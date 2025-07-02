@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Patterns of a Day</title>
+</head>
+<body>
+    <h1>Patterns of a Day</h1>
+    <ul>
+        <li th:each="patternName : ${patternNames}">
+            <a th:href="@{/patternRecords(date=${date},patternName=${patternName})}" th:text="${patternName}"></a>
+        </li>
+    </ul>
+</body>
+</html>

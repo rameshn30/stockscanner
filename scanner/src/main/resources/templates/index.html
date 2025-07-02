@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Unique Dates</title>
+</head>
+<body>
+    <h1>Unique Dates</h1>
+    <ul>
+        <!-- Loop through the unique dates and generate links -->
+        <li th:each="date : ${uniqueDates}">
+            <a th:href="@{/patterns(date=${date})}" th:text="${date}"></a>
+        </li>
+    </ul>
+</body>
+</html>

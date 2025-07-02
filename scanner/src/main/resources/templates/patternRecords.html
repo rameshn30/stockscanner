@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title th:text="${patternName} + ' Patterns'">Pattern Patterns</title>
+    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+<div class="container-fluid">
+    <div class="row">
+        <div th:each="pattern : ${patternRecords}" class="col-md-4">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">Symbol: <span th:text="${pattern.symbol}"></span></h5>
+                    <p class="card-text">Pattern Name: <span th:text="${patternName}"></span></p>
+                    <p class="card-text" th:if="${pattern.rank > 0}">Rank: <span th:text="${pattern.rank}"></span></p>
+                    <p class="card-text" th:if="${pattern.rank > 0}">Rank Str: <span th:text="${pattern.rankStr}"></span></p>
+                    <p class="card-text" th:if="${pattern.head > 0}">Head: <span th:text="${pattern.head}"></span></p>
+                    <p class="card-text" th:if="${pattern.tail > 0}">Tail: <span th:text="${pattern.tail}"></span></p>
+                    <p class="card-text" th:if="${pattern.body0 > 0}">Body: <span th:text="${pattern.body0}"></span></p>
+                    <p class="card-text" th:if="${pattern.bbValues != null && pattern.bbValues.upper > 0}">BB Upper: <span th:text="${pattern.bbValues != null ? pattern.bbValues.upper : ''}"></span></p>
+                    <p class="card-text" th:if="${pattern.bbValues != null && pattern.bbValues.lower > 0}">BB Lower: <span th:text="${pattern.bbValues != null ? pattern.bbValues.lower : ''}"></span></p>
+                    <!-- Add "+ BB watchlist" button -->
+                    <form th:if="${'Upper BB' == patternName}" th:action="@{/watchlist}" method="post">
+                        <input type="hidden" name="symbol" th:value="${pattern.symbol}">
+                        <input type="hidden" name="patternName" th:value="${patternName}">
+                        <input type="hidden" name="date" th:value="${date}">
+                        <button type="submit" class="btn btn-primary">+ BB watchlist</button>
+                    </form>
+                    <!-- Add more pattern information as needed -->
+                    <img th:src="'https://stockcharts.com/c-sc/sc?s=' + ${pattern.symbol} + '.IN&' + 'p=D&yr=0&mn=3&dy=0&i=t2469040689c&r=1708086404315'"
+                         class="img-fluid"/>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.4.1/dist/umd/popper.min.js"></script>
+<script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+</body>
+</html>
