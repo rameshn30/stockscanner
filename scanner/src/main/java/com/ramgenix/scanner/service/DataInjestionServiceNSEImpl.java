@@ -14,7 +14,6 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeFormatterBuilder;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -65,12 +64,21 @@ public class DataInjestionServiceNSEImpl {
 	LocalDate processingDate;
 	private final PatternRepository patternRepository;
 	private final StockMasterRepository stockMasterRepository;
+	private final Map<String, String> patternToFileNameMap;
 
 	@Autowired
 	public DataInjestionServiceNSEImpl(PatternRepository patternRepository,
 			StockMasterRepository stockMasterRepository) {
 		this.patternRepository = patternRepository;
 		this.stockMasterRepository = stockMasterRepository;
+		this.patternToFileNameMap = new HashMap<>();
+		patternToFileNameMap.put("BurstRetracement", "BurstRetracement");
+		patternToFileNameMap.put("SuperPatterns", "SuperPatterns");
+		patternToFileNameMap.put("Hammer", "1_Hammer");
+		patternToFileNameMap.put("NearSupport", "NearSupport");
+		patternToFileNameMap.put("BreakoutBars", "ResistanceTurnedSupport");
+		patternToFileNameMap.put("BullFlag", "BullFlag");
+		patternToFileNameMap.put("AscendingTriangle", "AscendingTriangle");
 	}
 
 	BBValues bbValues = null;
@@ -79,7 +87,7 @@ public class DataInjestionServiceNSEImpl {
 	Map<String, List<Pattern>> patternResults = new ConcurrentHashMap<>();
 	Set<String> patternResultsSet = new HashSet<>();
 	String outputFilePath = "C:\\Users\\USER\\OneDrive - RamGenix\\ASX\\newhtml\\";
-	private String stockchartsurl = "p=D&yr=0&mn=6&dy=0&i=t4585230540c&r=1751340691814";
+	private String stockchartsurl = "p=D&b=5&g=0&i=t2623804363c&r=1751514219638";
 	Set<String> inputWatchList = new HashSet<>();
 	String watchlist = "";
 
@@ -107,12 +115,6 @@ public class DataInjestionServiceNSEImpl {
 		stockDataMap.clear();
 		stockDataMap = prepareDataForProcessing();
 
-		// createSectorWatchlist(stockDataMap);
-
-		// performSectorAnalysis(stockDataMap);
-
-		// if(stockDataMap!=null) return "done";
-
 		stockDataMap.forEach((symbol, stockDataList) -> {
 			if (inputWatchList.isEmpty() || inputWatchList.contains(symbol)) {
 				markSwingHighsAndLows(stockDataList);
@@ -120,16 +122,11 @@ public class DataInjestionServiceNSEImpl {
 				bbValues = calculateBBAndMaValues(symbol, stockDataList, 0);
 
 				if (volumeCheck(stockDataList) && priceCheck(stockDataList) && symbolCheck(stockDataList)) {
-					// isNew52WeekHigh(stockDataList);
-					// findOneMonthHighStocks(stockDataList);
 					findVolumeShockers(symbol, stockDataList);
 					findPurpleDotStocks(symbol, stockDataList);
 					findGapUpStocks(symbol, stockDataList);
 					findPowerUpCandleStocks(symbol, stockDataList);
-					// findtwoLynch(symbol, stockDataList);
 				}
-
-				// initializeGoldenStocks();
 
 				boolean goldenStocksOnly = false;
 				if (!patternResultsSet.contains(symbol)) {
@@ -148,212 +145,90 @@ public class DataInjestionServiceNSEImpl {
 		if (StringUtils.isEmpty(watchlist))
 			watchList();
 
-		getVolumeShockersWithinLast10Days();
-
 		getRestingStocksAfterBurst();
 
-		List<Pattern> burstRetracementList = patternResults.get("BurstRetracement");
-		if (burstRetracementList != null) {
-			Collections.sort(burstRetracementList, new RankComparator());
-			savePatternsToFile(dates.get(0), burstRetracementList, "BurstRetracement", false, false);
-		}
-
-		List<Pattern> SuperPatterns = patternResults.get("SuperPatterns");
-		if (SuperPatterns != null) {
-			Collections.sort(SuperPatterns, new MADistanceComparator());
-			savePatternsToFile(dates.get(0), SuperPatterns, "SuperPatterns", false, false);
-		}
-
-		List<Pattern> hammerResults = patternResults.get("Hammer");
-		if (hammerResults != null) {
-			Collections.sort(hammerResults, new RankComparator());
-			savePatternsToFile(dates.get(0), hammerResults, "1_Hammer", false, false);
-		}
-
-		List<Pattern> nearSupportResults = patternResults.get("NearSupport");
-		if (nearSupportResults != null) {
-			Collections.sort(nearSupportResults, new RankComparator());
-			savePatternsToFile(dates.get(0), nearSupportResults, "NearSupport", false, false);
-		}
-
-		List<Pattern> resistanceTurnedSupportResults = patternResults.get("BreakoutBars");
-		if (resistanceTurnedSupportResults != null) {
-			Collections.sort(resistanceTurnedSupportResults, new RankComparator());
-			savePatternsToFile(dates.get(0), resistanceTurnedSupportResults, "ResistanceTurnedSupport", false, false);
-		}
-
-		List<Pattern> bullFlagResults = patternResults.get("BullFlag");
-		if (bullFlagResults != null) {
-			Collections.sort(bullFlagResults, new RankComparator());
-			savePatternsToFile(dates.get(0), bullFlagResults, "BullFlag", false, false);
-		}
-
-		saveAsendingTrianglePatterns();
-
-		List<Pattern> pbsResults = patternResults.get("PBS");
-		if (pbsResults != null) {
-			Collections.sort(pbsResults, new RankComparator());
-			savePatternsToFile(dates.get(0), pbsResults, "7_PBS", false, false);
-		}
-
-		/*
-		 * List<Pattern> greenRedResults = patternResults.get("GreenRed"); if
-		 * (greenRedResults != null) { Collections.sort(greenRedResults, new
-		 * RankComparator()); savePatternsToFile(dates.get(0), greenRedResults,
-		 * "GreenRed", false, false); }
-		 * 
-		 * List<Pattern> gapupResults = patternResults.get("Gapup"); if (gapupResults !=
-		 * null) { Collections.sort(gapupResults, new RankComparator());
-		 * savePatternsToFile(dates.get(0), gapupResults, "GapUp", false, false); }
-		 * 
-		 * List<Pattern> powerUpCandleResults = patternResults.get("PowerUpCandle"); if
-		 * (powerUpCandleResults != null) { Collections.sort(powerUpCandleResults, new
-		 * RankComparator()); savePatternsToFile(dates.get(0), powerUpCandleResults,
-		 * "PowerUp", false, false); }
-		 * 
-		 * List<Pattern> volumeResults = patternResults.get("VolumeShockers"); if
-		 * (volumeResults != null) { Collections.sort(volumeResults, new
-		 * RankComparator()); savePatternsToFile(dates.get(0), volumeResults,
-		 * "2_Volume Shockers Today", false, false); }
-		 * 
-		 * List<Pattern> twentyMAResults = patternResults.get("20MA"); if
-		 * (twentyMAResults != null) { // Collections.sort(volumeShockersPast, new
-		 * RankComparator()); savePatternsToFile(dates.get(0), twentyMAResults, "20MA",
-		 * false, false); }
-		 * 
-		 * List<Pattern> beResults = patternResults.get("BullishEngulfing"); if
-		 * (beResults != null) { Collections.sort(beResults, new BodyComparator());
-		 * savePatternsToFile(dates.get(0), beResults, "5_BullishEngulfing", false,
-		 * false); }
-		 * 
-		 * List<Pattern> pierceResults = patternResults.get("Pierce"); if (pierceResults
-		 * != null) { Collections.sort(pierceResults, new BodyComparator());
-		 * savePatternsToFile(dates.get(0), pierceResults, "6_Pierce", false, false); }
-		 * 
-		 * List<Pattern> pbsResults = patternResults.get("PBS"); if (pbsResults != null)
-		 * { Collections.sort(pbsResults, new RankComparator());
-		 * savePatternsToFile(dates.get(0), pbsResults, "7_PBS", false, false); }
-		 * 
-		 * List<Pattern> btResults = patternResults.get("BT"); if (btResults != null) {
-		 * Collections.sort(btResults, new RankComparator());
-		 * savePatternsToFile(dates.get(0), btResults, "8_BT", false, false); }
-		 * 
-		 * List<Pattern> bbContractionResults = patternResults.get("BB Contraction"); if
-		 * (bbContractionResults != null) { Collections.sort(bbContractionResults, new
-		 * RankComparator()); savePatternsToFile(dates.get(0), bbContractionResults,
-		 * "4_BB Contraction", false, false); }
-		 * 
-		 * List<Pattern> consolidationResults = patternResults.get("Consolidation"); if
-		 * (consolidationResults != null) { Collections.sort(consolidationResults, new
-		 * RankAndRangeComparator()); savePatternsToFile(dates.get(0),
-		 * consolidationResults, "3_Consolidation", false, false); }
-		 * 
-		 * List<Pattern> purpleDotConsolidationResults =
-		 * patternResults.get("PurpleDotConsolidation"); if
-		 * (purpleDotConsolidationResults != null) {
-		 * Collections.sort(purpleDotConsolidationResults, new
-		 * RankAndRangeComparator()); savePatternsToFile(dates.get(0),
-		 * purpleDotConsolidationResults, "4_PurpleDotConsolidation", false, false); }
-		 * 
-		 * List<Pattern> upperBBResults = patternResults.get("Upper BB"); if
-		 * (upperBBResults != null) { Collections.sort(upperBBResults, new
-		 * BodyComparator()); savePatternsToFile(dates.get(0), upperBBResults,
-		 * "13_Upper BB", false, false); }
-		 * 
-		 * List<Pattern> bullCOGResults = patternResults.get("BullCOG"); if
-		 * (bullCOGResults != null) Collections.sort(bullCOGResults, new
-		 * BodyComparator());
-		 * 
-		 * List<Pattern> lowerBBResults = patternResults.get("Lower BB"); if
-		 * (lowerBBResults != null) Collections.sort(lowerBBResults, new
-		 * RankComparator());
-		 * 
-		 * List<Pattern> updayResults = patternResults.get("UpDay"); if (updayResults !=
-		 * null) Collections.sort(updayResults, new BodyComparator());
-		 * 
-		 * List<Pattern> firstHigherLowresults = patternResults.get("First Higher Low");
-		 * if (firstHigherLowresults != null) Collections.sort(firstHigherLowresults,
-		 * new RankComparator());
-		 * 
-		 * if (lowerBBResults != null) savePatternsToFile(dates.get(0), lowerBBResults,
-		 * "Lower BB", false, false);
-		 * 
-		 * if (firstHigherLowresults != null) savePatternsToFile(dates.get(0),
-		 * firstHigherLowresults, "First Higher Low", false, false);
-		 * 
-		 * if (updayResults != null) savePatternsToFile(dates.get(0), updayResults,
-		 * "UpDay", false, false);
-		 * 
-		 * if (bullCOGResults != null) savePatternsToFile(dates.get(0), bullCOGResults,
-		 * "BullCOG", false, false); if (greenRedResults != null)
-		 * savePatternsToFile(dates.get(0), greenRedResults, "GreenRed", false, false);
-		 * 
-		 * List<Pattern> shootingStarResults = patternResults.get("ShootingStar"); if
-		 * (shootingStarResults != null) Collections.sort(shootingStarResults, new
-		 * RankHeadComparator());
-		 * 
-		 * List<Pattern> uhResults = patternResults.get("TT"); if (uhResults != null) {
-		 * Collections.sort(uhResults, new RankHeadComparator()); }
-		 * 
-		 * List<Pattern> bearishEngulfingResults =
-		 * patternResults.get("BearishEngulfing"); if (bearishEngulfingResults != null)
-		 * { Collections.sort(bearishEngulfingResults, new BodyComparator()); }
-		 * 
-		 * List<Pattern> darkCloudResults = patternResults.get("DarkCloud"); if
-		 * (darkCloudResults != null) { Collections.sort(darkCloudResults, new
-		 * BodyComparator()); }
-		 * 
-		 * List<Pattern> bearCOGResults = patternResults.get("BearCOG"); if
-		 * (bearCOGResults != null) { Collections.sort(bearCOGResults, new
-		 * BodyComparator()); }
-		 * 
-		 * List<Pattern> pssResults = patternResults.get("PSS"); if (pssResults != null)
-		 * { Collections.sort(pssResults, new BodyComparator()); }
-		 * 
-		 * List<Pattern> redGreenResults = patternResults.get("RedGreen"); if
-		 * (redGreenResults != null) { Collections.sort(redGreenResults, new
-		 * RankComparator()); }
-		 * 
-		 * List<Pattern> downdayResults = patternResults.get("DownDay"); if
-		 * (downdayResults != null) { Collections.sort(downdayResults, new
-		 * BodyComparator()); }
-		 * 
-		 * List<Pattern> bbRedResults = patternResults.get("BBRed"); if (bbRedResults !=
-		 * null) { Collections.sort(bbRedResults, new BodyComparator()); }
-		 * 
-		 * List<Pattern> fiveDaysUpResults = patternResults.get("FiveDaysUp"); if
-		 * (fiveDaysUpResults != null) { Collections.sort(fiveDaysUpResults, new
-		 * BodyComparator()); }
-		 * 
-		 * if (downdayResults != null) savePatternsToFile(dates.get(0), downdayResults,
-		 * "DownDay", false, false); if (shootingStarResults != null)
-		 * savePatternsToFile(dates.get(0), shootingStarResults, "ShootingStar", false,
-		 * false); if (uhResults != null) savePatternsToFile(dates.get(0), uhResults,
-		 * "TT", false, false); if (fiveDaysUpResults != null)
-		 * savePatternsToFile(dates.get(0), fiveDaysUpResults, "FiveDaysUp", false,
-		 * false); if (bearishEngulfingResults != null) savePatternsToFile(dates.get(0),
-		 * bearishEngulfingResults, "BearishEngulfing", false, false); if
-		 * (darkCloudResults != null) savePatternsToFile(dates.get(0), darkCloudResults,
-		 * "DarkCloud", false, false); if (bearCOGResults != null)
-		 * savePatternsToFile(dates.get(0), bearCOGResults, "BearCOG", false, false); if
-		 * (redGreenResults != null) savePatternsToFile(dates.get(0), redGreenResults,
-		 * "RedGreen", false, false); if (bbRedResults != null)
-		 * savePatternsToFile(dates.get(0), bbRedResults, "BBRed", false, false); if
-		 * (pssResults != null) savePatternsToFile(dates.get(0), pssResults, "PSS",
-		 * false, false);
-		 * 
-		 */
+		// Process all pattern types
+		patternToFileNameMap.forEach(this::saveSortedPatterns);
 
 		return null;
 	}
 
-	private void saveAsendingTrianglePatterns() {
-		List<Pattern> ascendingTriangleResults = patternResults.get("AscendingTriangle");
-		if (ascendingTriangleResults != null && !ascendingTriangleResults.isEmpty()) {
-			// Sort patterns by rank field in descending order
-			ascendingTriangleResults.sort((p1, p2) -> Double.compare(p2.getRank(), p1.getRank()));
-			savePatternsToFile(dates.get(0), ascendingTriangleResults, "AscendingTriangle", false, false);
+	private void saveSortedPatterns(String patternName, String fileName) {
+		List<Pattern> patterns = patternResults.get(patternName);
+		if (patterns != null && !patterns.isEmpty()) {
+			// Sort and save full pattern file
+			patterns.sort(new RankComparator());
+			savePatternsToFile(dates.get(0), patterns, fileName, false, false);
+
+			// Generate incremental patterns
+			List<Pattern> incrementalPatterns = getIncrementalPatterns(patternName, patterns);
+			if (!incrementalPatterns.isEmpty()) {
+				incrementalPatterns.sort(new RankComparator());
+				savePatternsToFile(dates.get(0), incrementalPatterns, "incremental-" + fileName, false, false);
+			}
 		}
+	}
+
+	private List<Pattern> getIncrementalPatterns(String patternName, List<Pattern> currentPatterns) {
+		Set<String> previousSymbols = getPreviousDaySymbols(patternName);
+		List<Pattern> incrementalPatterns = new ArrayList<>();
+
+		for (Pattern pattern : currentPatterns) {
+			String symbol = pattern.getStockData().getSymbol();
+			if (!previousSymbols.contains(symbol)) {
+				incrementalPatterns.add(pattern);
+			}
+		}
+
+		return incrementalPatterns;
+	}
+
+	private Set<String> getPreviousDaySymbols(String patternName) {
+		Set<String> symbols = new HashSet<>();
+		String fileName = patternToFileNameMap.get(patternName);
+		if (fileName == null) {
+			LOG.warn("No file name mapping found for pattern: {}", patternName);
+			return symbols;
+		}
+
+		LocalDate[] previousDates = { processingDate.minusDays(1), processingDate.minusDays(2) };
+
+		for (LocalDate date : previousDates) {
+			String formattedDate = date.format(DateTimeFormatter.ofPattern("yyyyMMdd"));
+			String filePath = outputFilePath + fileName + "_" + formattedDate + ".html";
+			File file = new File(filePath);
+
+			if (file.exists()) {
+				try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
+					String line;
+					while ((line = reader.readLine()) != null) {
+						if (line.contains("Symbol: ")) {
+							int startIndex = line.indexOf("Symbol: ") + 8;
+							int endIndex = line.indexOf(" ", startIndex);
+							if (endIndex == -1) {
+								endIndex = line.indexOf("<", startIndex);
+							}
+							if (endIndex == -1) {
+								endIndex = line.length();
+							}
+							if (startIndex < endIndex) {
+								String symbol = line.substring(startIndex, endIndex).trim();
+								if (!symbol.isEmpty()) {
+									symbols.add(symbol);
+								}
+							}
+						}
+					}
+					LOG.info("Read {} symbols from previous file: {}", symbols.size(), filePath);
+					return symbols;
+				} catch (IOException e) {
+					LOG.error("Error reading previous day's file {}: {}", filePath, e.getMessage());
+				}
+			}
+		}
+
+		LOG.info("No previous file found for pattern {}, treating all patterns as incremental", patternName);
+		return symbols;
 	}
 
 	private boolean symbolCheck(List<StockData> stockDataList) {
@@ -399,7 +274,6 @@ public class DataInjestionServiceNSEImpl {
 		String lowercaseDateString = dates.get(0).toLowerCase();
 		processingDate = DateFormatChecker.processDate(lowercaseDateString);
 
-		int i = 0;
 		for (String date : dates) {
 			if (!date.isEmpty()) {
 				if (DateFormatChecker.isNewDateFormat(date))
@@ -408,8 +282,6 @@ public class DataInjestionServiceNSEImpl {
 					GetStockDataFromCSV(date, stockDataMap);
 
 			}
-
-			i++;
 		}
 		return stockDataMap;
 	}
@@ -431,7 +303,7 @@ public class DataInjestionServiceNSEImpl {
 		result = shootingStar(symbol, stockDataList);
 		if (result)
 			return;
-		result = bearishEngulfing(symbol, stockDataList);
+
 		if (result)
 			return;
 		result = darkCloud(symbol, stockDataList);
@@ -459,27 +331,16 @@ public class DataInjestionServiceNSEImpl {
 			// return;
 		}
 
-		// bbValues = calculateBBAndMaValues(symbol, stockDataList, 0);
-
 		StockDataInfo sd = new StockDataInfo(stockDataList);
 
 		findNearSupportStocks(symbol, stockDataList);
 		findBreakoutBars(symbol, stockDataList);
-		// findBullFlagPoleStocks(symbol, stockDataList);
 		findBullFlagStocks(symbol, stockDataList);
 		findAscendingTriangleStocks(symbol, stockDataList);
-
-		/*
-		 * if ((bbValues != null && sd.close_0 < bbValues.getMa_200())) { return; }
-		 */
 
 		if (!volumeCheck(stockDataList) || !priceCheck(stockDataList))
 			return false;
 
-		int rank = 0;
-		String rankStr = "";
-
-		boolean goldenStocksOnly = true;
 		boolean result = false;
 
 		result = findHammerStocks(symbol, stockDataList);
@@ -493,43 +354,6 @@ public class DataInjestionServiceNSEImpl {
 
 		if (!result)
 			return false;
-
-		/*
-		 * result = gapUp(symbol, stockDataList); if (result) return true;
-		 * 
-		 * result = powerUpCandle(symbol, stockDataList); if (result) return true;
-		 */
-		/*
-		 * result = volumeShockers(symbol, stockDataList); if (result) return;
-		 * 
-		 * result = find20MAStocks(symbol, stockDataList); if (result) return;
-		 */
-
-		/*
-		 * result = ubb(symbol, stockDataList); if (result) return true;
-		 * 
-		 * result = pbs(symbol, stockDataList); if (result) return true;
-		 * 
-		 * result = bullishEngulfing(symbol, stockDataList); if (result) return true;
-		 * 
-		 * result = bbContraction(symbol, stockDataList); if (result) return true;
-		 * 
-		 * result = pierce(symbol, stockDataList); if (result) return true;
-		 * 
-		 * result = slopeconsolidation(symbol, stockDataList, 4, 1.5, 3); if (result)
-		 * return true;
-		 * 
-		 * result = consolidation(symbol, stockDataList, 5, 0.75, goldenStocksOnly); if
-		 * (result) return true;
-		 * 
-		 * result = checkPurlpleDotConsolidation(symbol, stockDataList); if (result)
-		 * return true;
-		 * 
-		 * result = greenRed(symbol, stockDataList); if (result) return true;
-		 */
-		/*
-		 * result = bottomTail(symbol, stockDataList); if (result) return true;
-		 */
 
 		return false;
 
@@ -798,137 +622,6 @@ public class DataInjestionServiceNSEImpl {
 		pattern.setRankStr(rankStr);
 		pattern.setRank(calculateADR(stockDataList, 20));
 		patternResults.computeIfAbsent(patternType, k -> new ArrayList<>()).add(pattern);
-		return true;
-	}
-
-	private boolean findBullFlagPoleStocks(String symbol, List<StockData> stockDataList) {
-		// Validate input
-		if (stockDataList == null || stockDataList.isEmpty() || !volumeCheck(stockDataList)
-				|| !priceCheck(stockDataList)) {
-			return false;
-		}
-
-		String type = "BullFlagPole";
-		double priceIncreaseThreshold = 15.0; // Price increase > 10%
-		double volumeIncreaseThreshold = 1.5; // Volume > 1.5x historical average
-		int minWindowSize = 4; // Minimum bars in flagpole
-		int maxWindowSize = 10; // Maximum bars in flagpole
-		int historicalVolumePeriod = 20; // Historical volume period
-		StockDataInfo sd = new StockDataInfo(stockDataList);
-
-		// Ensure enough data points (min window + historical volume)
-		if (stockDataList.size() < minWindowSize + historicalVolumePeriod) {
-			return false;
-		}
-
-		// Get the latest closing price
-		double latestClose = stockDataList.get(0).getClose();
-		if (latestClose == 0.0) {
-			return false; // Avoid invalid close price
-		}
-
-		// Find the most recent valid flagpole window
-		double flagpoleLow = 0.0;
-		double flagpoleHigh = 0.0;
-		double flagpoleSize = 0.0;
-		double volumeIncrease = 0.0;
-		int flagpoleStart = -1;
-		int flagpoleEnd = -1;
-		int lowIndex = -1;
-		int highIndex = -1;
-		LocalDate startDate = null;
-		LocalDate endDate = null;
-
-		for (int i = 1; i <= stockDataList.size() - minWindowSize; i++) {
-			for (int windowSize = minWindowSize; windowSize <= maxWindowSize
-					&& i + windowSize - 1 < stockDataList.size(); windowSize++) {
-				// Calculate price and volume for the window
-				double minLow = Double.MAX_VALUE;
-				double maxHigh = 0.0;
-				double volumeSum = 0.0;
-				int tempLowIndex = -1;
-				int tempHighIndex = -1;
-
-				for (int j = i; j < i + windowSize; j++) {
-					StockData stockData = stockDataList.get(j);
-					if (stockData.getLow() < minLow) {
-						minLow = stockData.getLow();
-						tempLowIndex = j;
-					}
-					if (stockData.getHigh() > maxHigh) {
-						maxHigh = stockData.getHigh();
-						tempHighIndex = j;
-					}
-					volumeSum += stockData.getVolume();
-				}
-
-				// Calculate price increase
-				double priceIncrease = (maxHigh - minLow) / minLow * 100;
-				if (priceIncrease <= priceIncreaseThreshold) {
-					continue; // Price increase not sufficient
-				}
-
-				// Calculate average window volume
-				double avgWindowVolume = volumeSum / windowSize;
-
-				// Calculate historical volume (20 bars before window start)
-				double historicalVolumeSum = 0.0;
-				int historicalCount = 0;
-				for (int j = i + windowSize; j < i + windowSize + historicalVolumePeriod
-						&& j < stockDataList.size(); j++) {
-					historicalVolumeSum += stockDataList.get(j).getVolume();
-					historicalCount++;
-				}
-				if (historicalCount < historicalVolumePeriod) {
-					continue; // Not enough historical data
-				}
-				double avgHistoricalVolume = historicalVolumeSum / historicalCount;
-
-				// Check volume increase
-				if (avgWindowVolume <= volumeIncreaseThreshold * avgHistoricalVolume) {
-					continue; // Volume not sufficient
-				}
-
-				// Verify chronological order of low and high
-				LocalDate tempStartDate = stockDataList.get(tempLowIndex).getDate();
-				LocalDate tempEndDate = stockDataList.get(tempHighIndex).getDate();
-				if (tempStartDate != null && tempEndDate != null && tempStartDate.isAfter(tempEndDate)) {
-					continue; // Low occurs after high, invalid for bull flagpole
-				}
-
-				// Valid flagpole found
-				flagpoleLow = minLow;
-				flagpoleHigh = maxHigh;
-				flagpoleSize = priceIncrease;
-				volumeIncrease = avgWindowVolume / avgHistoricalVolume;
-				flagpoleStart = i + windowSize - 1; // Earliest bar
-				flagpoleEnd = i; // Latest bar
-				lowIndex = tempLowIndex;
-				highIndex = tempHighIndex;
-				startDate = tempStartDate;
-				endDate = tempEndDate;
-				break; // Use the most recent valid window
-			}
-			if (flagpoleStart != -1) {
-				break; // Stop after finding the first valid window
-			}
-		}
-
-		// If no valid flagpole found, return false
-		if (flagpoleStart == -1) {
-			return false;
-		}
-
-		// Create pattern for valid flagpole
-		Pattern pattern = Pattern.builder().patternName(type).stockData(stockDataList.get(0)).head(sd.head_0)
-				.tail(sd.tail_0).body0(sd.body_0).build();
-		String rankStr = " FlagpoleLow:" + String.format("%.2f", flagpoleLow) + " FlagpoleHigh:"
-				+ String.format("%.2f", flagpoleHigh) + " PercentageIncrease:" + String.format("%.2f%%", flagpoleSize)
-				+ " StartDate:" + (startDate != null ? startDate.toString() : "N/A") + " EndDate:"
-				+ (endDate != null ? endDate.toString() : "N/A") + " VolumeIncrease:"
-				+ String.format("%.2f", volumeIncrease) + " LatestClose:" + String.format("%.2f", latestClose);
-		pattern.setRankStr(rankStr);
-		patternResults.computeIfAbsent(type, k -> new ArrayList<>()).add(pattern);
 		return true;
 	}
 
@@ -1356,77 +1049,6 @@ public class DataInjestionServiceNSEImpl {
 
 	}
 
-	private boolean bullishEngulfing(String symbol, List<StockData> stockDataList) {
-		String type = "BullishEngulfing";
-
-		StockDataInfo sd = new StockDataInfo(stockDataList);
-
-		if (sd.close_0 > sd.open_0 && sd.close_1 < sd.open_1 && sd.body_0 > 5
-				&& (sd.body_0 > sd.body_1 || sd.close_0 > sd.open_1)) {
-			Pattern pattern = new Pattern();
-			pattern.setPatternName(type);
-			pattern.setStockData(stockDataList.get(0));
-			pattern.setHead(sd.head_0);
-			pattern.setTail(sd.tail_0);
-			pattern.setBody0(sd.body_0);
-			// pattern.setBbValues(bbValues);
-
-			patternResults.computeIfAbsent(type, k -> new ArrayList<>()).add(pattern);
-			bullEngulfStrings.add(symbol);
-			return true;
-		}
-		return false;
-	}
-
-	private boolean bearishEngulfing(String symbol, List<StockData> stockDataList) {
-		String type = "BearishEngulfing";
-
-		StockDataInfo sd = new StockDataInfo(stockDataList);
-
-		if (sd.close_0 < sd.open_0
-				&& (sd.close_1 >= sd.open_1
-						|| ((sd.high_1 > sd.high_2 || sd.high_2 > sd.high_3) && sd.close_2 >= sd.open_2))
-				&& sd.body_0 > 5 && sd.body_0 > sd.body_1) {
-			Pattern pattern = new Pattern();
-			pattern.setPatternName(type);
-			pattern.setStockData(stockDataList.get(0));
-			pattern.setHead(sd.head_0);
-			pattern.setTail(sd.tail_0);
-			pattern.setBody0(sd.body_0);
-			// pattern.setBbValues(bbValues);
-
-			patternResults.computeIfAbsent(type, k -> new ArrayList<>()).add(pattern);
-			bearEngulfStrings.add(symbol);
-			return true;
-		}
-		return false;
-	}
-
-	private boolean pierce(String symbol, List<StockData> stockDataList) {
-		String type = "Pierce";
-
-		StockDataInfo sd = new StockDataInfo(stockDataList);
-		double half = (sd.open_1 + sd.close_1) / 2;
-
-		if (sd.close_0 > sd.open_0 && sd.close_1 < sd.open_1 && sd.close_0 > half && sd.open_0 <= sd.close_1) {
-			Pattern pattern = new Pattern();
-			pattern.setPatternName(type);
-			pattern.setStockData(stockDataList.get(0));
-			pattern.setHead(sd.head_0);
-			pattern.setTail(sd.tail_0);
-			pattern.setBody0(sd.body_0);
-			// pattern.setBbValues(bbValues);
-
-			patternResults.computeIfAbsent(type, k -> new ArrayList<>()).add(pattern);
-			if (bullEngulfStrings.contains(symbol)) {
-				return true;
-			}
-			bullEngulfStrings.add(symbol);
-			return true;
-		}
-		return false;
-	}
-
 	private boolean darkCloud(String symbol, List<StockData> stockDataList) {
 
 		String type = "DarkCloud";
@@ -1450,35 +1072,6 @@ public class DataInjestionServiceNSEImpl {
 			bearEngulfStrings.add(symbol);
 
 			return true;
-		}
-		return false;
-	}
-
-	private boolean bullCOG(String symbol, List<StockData> stockDataList) {
-		String type = "BullCOG";
-
-		StockDataInfo sd = new StockDataInfo(stockDataList);
-
-		if (sd.close_0 > sd.open_0
-				&& (sd.close_1 <= sd.open_1 && sd.close_2 <= sd.open_2 && sd.close_3 <= sd.open_3
-						|| sd.low_1 <= sd.low_2 && sd.low_2 <= sd.low_3)
-				&& sd.low_1 <= sd.low_2 && sd.low_2 <= sd.low_3 && sd.close_0 >= bbValues.getMa_50()) {
-			Pattern pattern = new Pattern();
-			pattern.setPatternName(type);
-			pattern.setStockData(stockDataList.get(0));
-			pattern.setHead(sd.head_0);
-			pattern.setTail(sd.tail_0);
-			pattern.setBody0(sd.body_0);
-			// pattern.setBbValues(bbValues);
-
-			patternResults.computeIfAbsent(type, k -> new ArrayList<>()).add(pattern);
-			if (bullEngulfStrings.contains(symbol)) {
-				return true;
-			}
-
-			bullEngulfStrings.add(symbol);
-			return true;
-
 		}
 		return false;
 	}
@@ -1764,201 +1357,6 @@ public class DataInjestionServiceNSEImpl {
 		return false;
 	}
 
-	private boolean ubb(String symbol, List<StockData> stockDataList) {
-
-		// if(bullEngulfStrings.contains(symbol)) return;
-
-		StockDataInfo sd = new StockDataInfo(stockDataList);
-
-		if (sd.close_0 > sd.open_0 && bbValues.getUpper() > 0 && sd.low_0 <= bbValues.getUpper()
-				&& sd.close_0 >= bbValues.getUpper()) {
-			String type = "Upper BB";
-			Pattern pattern = new Pattern();
-			pattern.setDate(null);
-			pattern.setPatternName(type);
-			pattern.setStockData(stockDataList.get(0));
-			pattern.setHead(sd.head_0);
-			pattern.setTail(sd.tail_0);
-			pattern.setBody0(sd.body_0);
-			pattern.setBbValues(bbValues);
-
-			patternResults.computeIfAbsent(type, k -> new ArrayList<>()).add(pattern);
-
-			savePattern(pattern, type, sd);
-
-			return true;
-		}
-
-		return false;
-	}
-
-	private boolean lbb(String symbol, List<StockData> stockDataList) {
-
-		// if(bullEngulfStrings.contains(symbol)) return;
-
-		StockDataInfo sd = new StockDataInfo(stockDataList);
-
-		if (bbValues.getLower() > 0 && sd.close_0 >= bbValues.getLower() && sd.low_0 <= bbValues.getLower()) {
-			String type = "Lower BB";
-			Pattern pattern = new Pattern();
-			pattern.setPatternName(type);
-			pattern.setStockData(stockDataList.get(0));
-			pattern.setHead(sd.head_0);
-			pattern.setTail(sd.tail_0);
-			pattern.setBody0(sd.body_0);
-			pattern.setBbValues(bbValues);
-
-			int rank = 0;
-			if (sd.close_0 > sd.open_0)
-				rank++;
-			if (sd.tail_0 > (sd.body_0 * 1.5))
-				rank++;
-			if (sd.close_0 < sd.open_0)
-				rank--;
-			pattern.setRank(rank);
-
-			patternResults.computeIfAbsent(type, k -> new ArrayList<>()).add(pattern);
-			return true;
-		}
-		return false;
-
-	}
-
-	private boolean bbContraction(String symbol, List<StockData> stockDataList) {
-
-		if (symbol.equals("GANECOS")) {
-			System.out.println("dff");
-		}
-
-		BBValues bb1 = calculateBBAndMaValues(symbol, stockDataList, 1);
-		BBValues bb2 = calculateBBAndMaValues(symbol, stockDataList, 2);
-		BBValues bb3 = calculateBBAndMaValues(symbol, stockDataList, 3);
-		BBValues bb4 = calculateBBAndMaValues(symbol, stockDataList, 4);
-
-		StockDataInfo sd = new StockDataInfo(stockDataList);
-
-		boolean bbContraction = false;
-
-		int rank = 0;
-		String rankStr = "";
-
-		if (sd.getClose_2() > sd.getOpen_2()
-				&& ((sd.low_2 < bb2.getUpper() && sd.close_2 > bb2.getUpper()) || sd.body_2 > bb2.getBodyAvg20())
-				&& sd.low_1 > sd.low_2 && sd.low_0 > sd.low_2 && sd.body_0 < sd.body_2 && sd.body_1 < sd.body_2) {
-
-			double pctSwing = ((sd.close_0 - sd.close_2) / sd.close_2) * 100;
-			if (pctSwing >= 1)
-				return false;
-
-			bbContraction = true;
-			rankStr = " Two day BB;";
-
-		}
-
-		if (!bbContraction && sd.getClose_3() > sd.getOpen_3()
-				&& ((sd.low_3 < bb3.getUpper() && sd.close_3 > bb3.getUpper()) || sd.body_3 > bb3.getBodyAvg20())
-				&& sd.low_2 > sd.low_3 && sd.low_1 > sd.low_3 && sd.low_0 > sd.low_3 && sd.body_0 < sd.body_3
-				&& sd.body_0 < sd.body_3 && sd.body_1 < sd.body_3) {
-
-			double pctSwing = ((sd.close_0 - sd.close_3) / sd.close_3) * 100;
-			if (pctSwing >= 1)
-				return false;
-
-			bbContraction = true;
-			rankStr = " Three days BB;";
-			rank++;
-
-		}
-
-		if (!bbContraction && sd.getClose_4() > sd.getOpen_4()
-				&& ((sd.low_4 < bb4.getUpper() && sd.close_4 > bb4.getUpper()) || sd.body_4 > bb4.getBodyAvg20())
-				&& sd.low_3 > sd.low_4 && sd.low_2 > sd.low_4 && sd.low_1 > sd.low_4 && sd.low_0 > sd.low_4
-				&& sd.body_0 < sd.body_4 && sd.body_0 < sd.body_4 && sd.body_0 < sd.body_4 && sd.body_1 < sd.body_4) {
-
-			double pctSwing = ((sd.close_0 - sd.close_3) / sd.close_3) * 100;
-			if (pctSwing >= 1)
-				return false;
-
-			bbContraction = true;
-			rankStr = " Four days BB;";
-			rank++;
-			rank++;
-
-		}
-
-		if (!bbContraction)
-			return false;
-
-		String type = "BB Contraction";
-		Pattern pattern = new Pattern();
-		pattern.setPatternName(type);
-		pattern.setStockData(stockDataList.get(0));
-		pattern.setHead(sd.head_0);
-		pattern.setTail(sd.tail_0);
-		pattern.setBody0(sd.body_2);
-		pattern.setBbValues(bbValues);
-
-		/*
-		 * String watchListName = getWatchlistForSymbol(symbol); if
-		 * (StringUtils.isNotEmpty(watchListName)) { rank = rank + 2; rankStr +=
-		 * "WatchList Stock : " + watchListName + " "; }
-		 */
-
-		if (sd.volume_3 > (sd.volume_4 * 2) && sd.close_3 > sd.open_3 && sd.close_3 > sd.close_4) {
-			rank++;
-			rank++;
-			rankStr += "Volume Shockers;";
-		}
-
-		if (sd.volume_2 > (sd.volume_3 * 2) && sd.close_2 > sd.open_2 && sd.close_2 > sd.close_3) {
-			rank++;
-			rank++;
-			rankStr += "Volume Shockers;";
-		}
-		if (sd.low_3 < bb3.getUpper() && sd.close_3 > bb3.getUpper()) {
-			rank++;
-			rankStr += "Upper BB 3;";
-		}
-		if (sd.low_2 < bb2.getUpper() && sd.close_2 > bb2.getUpper()) {
-			rank++;
-			rankStr += "Upper BB 2;";
-		}
-		if (sd.low_0 < sd.low_1 && sd.low_1 < sd.low_2) {
-			rank++;
-			rankStr += "Three day down;";
-		}
-		if (sd.low_0 < sd.low_1) {
-			rank++;
-			rankStr += "Two day down;";
-		}
-		// if(sd.tail_0 > sd.body_0 && sd.tail_0 > sd.head_0) { rank++ ;
-		// rankStr+="Bottom tails;"; }
-
-		pattern.setRank(rank);
-		pattern.setRankStr(rankStr);
-
-		patternResults.computeIfAbsent(type, k -> new ArrayList<>()).add(pattern);
-
-		return true;
-
-	}
-
-	private void fiveDaysUp(String symbol, List<StockData> stockDataList) {
-
-		String type = "FiveDaysUp";
-		StockDataInfo sd = new StockDataInfo(stockDataList);
-		if (sd.close_0 > sd.close_4) {
-			Pattern pattern = new Pattern();
-			pattern.setPatternName(type);
-			pattern.setStockData(stockDataList.get(0));
-			pattern.setHead(sd.head_0);
-			pattern.setTail(sd.tail_0);
-			pattern.setBody0(sd.close_0 - sd.close_4);
-			patternResults.computeIfAbsent(type, k -> new ArrayList<>()).add(pattern);
-		}
-
-	}
-
 	private boolean findVolumeShockers(String symbol, List<StockData> stockDataList) {
 		StockDataInfo sd = new StockDataInfo(stockDataList);
 
@@ -1991,478 +1389,6 @@ public class DataInjestionServiceNSEImpl {
 
 	}
 
-	public boolean isNew52WeekHigh(List<StockData> stockDataList) {
-		if (stockDataList == null || stockDataList.size() < 261) {
-			return false; // Not enough data points to analyze
-		}
-
-		// Get the latest stock price
-		double latestPrice = stockDataList.get(0).getClose();
-		StockDataInfo sd = new StockDataInfo(stockDataList);
-
-		double fiftyTwoWeekHigh = find52WeekHigh(stockDataList);
-
-		if (latestPrice < fiftyTwoWeekHigh) {
-			return false; // Today's price did not make a new high
-		}
-
-		String type = "52WeekHigh";
-
-		Pattern pattern = Pattern.builder().bbValues(bbValues).patternName(type).stockData(stockDataList.get(0))
-				.head(sd.head_0).tail(sd.tail_0).body0(sd.body_0).build();
-
-		savePattern(pattern, type, sd);
-
-		return true;
-	}
-
-	public double find52WeekHigh(List<StockData> stockDataList) {
-		if (stockDataList == null || stockDataList.size() < 260) {
-			return Double.MAX_VALUE;
-		}
-
-		double highestPrice = Double.MIN_VALUE;
-
-		// Iterate through the stockDataList to find the highest price in the last 52
-		// weeks
-		for (int i = 0; i < 260; i++) {
-			double currentHigh = stockDataList.get(i).getHigh();
-			if (currentHigh > highestPrice) {
-				highestPrice = currentHigh;
-			}
-		}
-
-		return highestPrice;
-	}
-
-	public double find52WeekLow(List<StockData> stockDataList) {
-		if (stockDataList == null || stockDataList.size() < 260) {
-			return Double.MIN_VALUE;
-		}
-
-		double lowestPrice = Double.MAX_VALUE;
-
-		// Iterate through the stockDataList to find the lowest price in the last 52
-		// weeks
-		for (int i = 0; i < 260; i++) {
-			double currentLow = stockDataList.get(i).getLow();
-			if (currentLow < lowestPrice) {
-				lowestPrice = currentLow;
-			}
-		}
-
-		return lowestPrice;
-	}
-
-	public boolean findOneMonthHighStocks(List<StockData> stockDataList) {
-		if (stockDataList == null || stockDataList.size() < 31) {
-			return false; // Not enough data points to analyze
-		}
-
-		// Get the latest stock price
-		double latestPrice = stockDataList.get(0).getClose();
-		StockDataInfo sd = new StockDataInfo(stockDataList);
-
-		if (bbValues.getMa_200() < latestPrice || bbValues.getMa_50() < latestPrice)
-			return false;
-
-		// Iterate through the stockDataList from index 1 through 1 month's index
-		for (int i = 1; i <= 30; i++) {
-			double currentClose = stockDataList.get(i).getClose();
-			if (currentClose > latestPrice) {
-				return false; // Today's price did not make a new high
-			}
-		}
-
-		String type = "OneMonthHigh";
-		Pattern pattern = Pattern.builder().bbValues(bbValues).patternName(type).stockData(stockDataList.get(0))
-				.head(sd.head_0).tail(sd.tail_0).body0(sd.body_0).build();
-
-		savePattern(pattern, type, sd);
-
-		return true; // Today's price made a new 1-month high
-	}
-
-	private boolean consolidation(String symbol, List<StockData> stockDataList, int numDays, double pct,
-			boolean goldenStocksOnly) {
-
-		/*
-		 * if (!isGoldenStock(symbol)) { return false; }
-		 */
-
-		if (stockDataList.size() < numDays) {
-			return false; // Not enough data points to analyze
-		}
-
-		if (symbol.contains("ETF") || symbol.contains("BEES") || isETFStock(symbol) || symbol.contains("LIQUID")
-				|| symbol.endsWith("LIQ") || symbol.endsWith("GOLD") || symbol.endsWith("ADD")
-				|| symbol.contains("NIFTY") || symbol.endsWith("SENSEX"))
-			return false;
-
-		if (!volumeCheck(stockDataList) || !priceCheck(stockDataList)) {
-			return false;
-		}
-
-		StockDataInfo sd = new StockDataInfo(stockDataList);
-
-		/*
-		 * if (isAnyRedPurpleDotInThePast(stockDataList, 20)) return false;
-		 */
-
-		int lastBigCandleIndex = findLastBigCandleIndex(stockDataList);
-
-		// Calculate the range of prices for the past numDays
-		double minPrice = Double.MAX_VALUE;
-		double maxPrice = Double.MIN_VALUE;
-		for (int i = 0; i < numDays; i++) {
-			double closePrice = stockDataList.get(i).getClose();
-			minPrice = Math.min(minPrice, closePrice);
-			maxPrice = Math.max(maxPrice, closePrice);
-		}
-
-		// Calculate the percentage change in price range
-		double range = maxPrice - minPrice;
-		double rangePercentage = (range / minPrice) * 100;
-
-		// Check if the range percentage is less than or equal to the specified
-		// percentage
-		// and if the price movement for every day does not exceed the threshold
-		// percentage
-		boolean consolidation = false;
-		String rankStr = "box -> rangePercentagec:" + rangePercentage;
-		Pattern pattern = new Pattern();
-
-		if (rangePercentage <= pct /* && !exceedsThreshold(stockDataList, numDays, thresholdPct) */) {
-			consolidation = true;
-			// pattern.setRankStr(rankStr);
-			// pattern.setRank(numDays);
-		}
-
-		if (consolidation) {
-			int rank = 0;
-			String type = "Consolidation";
-			pattern.setPatternName(type);
-			pattern.setStockData(stockDataList.get(0));
-			pattern.setHead(sd.head_0);
-			pattern.setTail(sd.tail_0);
-			pattern.setBody0(sd.body_0);
-			pattern.setBbValues(bbValues);
-			pattern.setRangePct(rangePercentage);
-
-			String watchListName = getWatchlistForSymbol(symbol);
-			if (StringUtils.isNotEmpty(watchListName)) {
-				rank = rank + 2;
-				rankStr = "WatchList Stock : " + watchListName + " ";
-			}
-
-			if (Math.max(sd.close_0, sd.open_0) <= Math.max(sd.close_1, sd.open_1)
-					&& Math.min(sd.close_0, sd.open_0) >= Math.min(sd.close_1, sd.open_1)) {
-				rank++;
-				rankStr += " ->Inside Bar 1 ";
-			} else if (sd.high_0 <= sd.high_1 && sd.low_0 >= sd.low_1) {
-				rank++;
-				rankStr += " ->Inside Bar 2 ";
-			}
-
-			double latestClose = stockDataList.get(0).getClose();
-			double weekLow = bbValues.getFiftyTwoWeekLow();
-			double forcePct = ((latestClose - weekLow) / weekLow) * 100;
-			rankStr += " forcePct:" + forcePct + " ";
-
-			if (forcePct > 30)
-				rank++;
-
-			int greenPurpleDayCount = countGreenPurpleDays(stockDataList, 30);
-			rankStr += " greenPurpleDayCount:" + greenPurpleDayCount + " ";
-
-			if (greenPurpleDayCount >= 10)
-				rank = rank + 3;
-			else if (greenPurpleDayCount >= 5)
-				rank = rank + 2;
-			else if (greenPurpleDayCount >= 1)
-				rank = rank + 1;
-
-			double ma_20 = bbValues.getMa_20();
-			double ma20ForcePct = ((ma_20 - latestClose) / ma_20) * 100;
-			rankStr += " ma20ForcePct:" + ma20ForcePct + " ";
-
-			if (ma20ForcePct > 0 && ma20ForcePct <= 1)
-				rank = rank + 2;
-			if (ma20ForcePct > 1 && ma20ForcePct <= 3)
-				rank = rank + 1;
-			if (ma20ForcePct < 0 && ma20ForcePct >= -1)
-				rank = rank + 2;
-			if (ma20ForcePct < -1 && ma20ForcePct >= -3)
-				rank = rank + 1;
-
-			if (lastBigCandleIndex > 0) {
-				StockData bigDay = stockDataList.get(lastBigCandleIndex);
-				if (isPurpleCandle(bigDay)) {
-					if (bigDay.getDate() != null)
-						rankStr += " ->Recent purple day " + bigDay.getDate().toString();
-				}
-			}
-
-			pattern.setRank(rank);
-			pattern.setRankStr(rankStr);
-			patternResults.computeIfAbsent(type, k -> new ArrayList<>()).add(pattern);
-
-			return true;
-		} else {
-			// numDays=numDays+1;
-			// return consolidation(symbol,stockDataList,numDays,pct,thresholdPct);
-		}
-		return false;
-	}
-
-	private int countGreenPurpleDays(List<StockData> stockDataList, int days) {
-		int count = 0;
-		for (int i = 0; i < days; i++) {
-			StockData stockData = stockDataList.get(i);
-			if (stockData.getPurpleDotType() != null && stockData.getPurpleDotType().equals("GP"))
-				count++;
-		}
-		return count;
-	}
-
-	private boolean isAnyRedPurpleDotInThePast(List<StockData> stockDataList, int days) {
-		for (int i = 1; i < days; i++) {
-			StockData currentDay = stockDataList.get(i);
-			if (currentDay.getClose() < currentDay.getOpen() && isPurpleCandle(currentDay)) {
-				return true;
-			}
-		}
-
-		return false;
-	}
-
-	private boolean newconsolidation(String symbol, List<StockData> stockDataList, int numDays, double pct,
-			double thresholdPct) {
-		if (numDays > 10)
-			return false;
-
-		if (stockDataList.size() <= numDays) {
-			return false; // Not enough data points to analyze
-		}
-
-		{
-
-			double latestClose = stockDataList.get(0).getClose();
-			double previousClose = stockDataList.get(numDays - 1).getClose();
-
-			double percentageChange = ((latestClose - previousClose) / previousClose) * 100;
-
-			boolean consolidation = Math.abs(percentageChange) <= pct;
-
-			if (!consolidation)
-				return false;
-
-		}
-
-		if (!exceedsThreshold(stockDataList, numDays, thresholdPct)) {
-			StockDataInfo sd = new StockDataInfo(stockDataList);
-			Pattern pattern = new Pattern();
-			String type = "Consolidation";
-			pattern.setPatternName(type);
-			pattern.setStockData(stockDataList.get(0));
-			pattern.setHead(sd.head_0);
-			pattern.setTail(sd.tail_0);
-			pattern.setBody0(sd.body_0);
-			pattern.setBbValues(bbValues);
-			double latestClose = stockDataList.get(0).getClose();
-			double previousClose = stockDataList.get(numDays - 1).getClose();
-			double percentageChange = ((latestClose - previousClose) / previousClose) * 100;
-			pattern.setRangePct(percentageChange);
-			String watchListName = getWatchlistForSymbol(symbol);
-			int rank = 0;
-			String rankStr = "";
-			if (StringUtils.isNotEmpty(watchListName)) {
-				rank = rank + 2;
-				rankStr = "WatchList Stock : " + watchListName + " ";
-			} else
-				rank = numDays;
-			rankStr += "sideways -> rangePercentage:" + percentageChange + " numDays:" + numDays;
-			pattern.setRankStr(rankStr);
-			pattern.setRank(rank);
-
-			patternResults.computeIfAbsent(type, k -> new ArrayList<>()).add(pattern);
-
-			return true;
-		} else {
-			// numDays++;
-			// return newconsolidation(symbol,stockDataList,numDays,pct,thresholdPct);
-		}
-		return false;
-
-	}
-
-	private boolean slopeconsolidation(String symbol, List<StockData> stockDataList, int numDays, double pct,
-			double thresholdPct) {
-		if (numDays > 10)
-			return false;
-
-		if (stockDataList.size() <= numDays) {
-			return false; // Not enough data points to analyze
-		}
-
-		double latestClose = stockDataList.get(0).getClose();
-		double previousClose = stockDataList.get(numDays - 1).getOpen();
-
-		/*
-		 * double latestClose=(Math.max(stockDataList.get(0).getClose(),
-		 * stockDataList.get(0).getOpen())-Math.min(stockDataList.get(0).getClose(),
-		 * stockDataList.get(0).getOpen()))/2; double
-		 * previousClose=(Math.max(stockDataList.get(numDays - 1).getClose(),
-		 * stockDataList.get(numDays - 1).getOpen())-Math.min(stockDataList.get(numDays
-		 * - 1).getClose(), stockDataList.get(numDays - 1).getOpen()))/2;
-		 */
-		double priceDifference = latestClose - previousClose;
-
-		// Choose a reference price (optional, using price1 here)
-		double referencePrice = previousClose;
-
-		// Calculate the angle in radians using arctangent
-		double radians = Math.atan(priceDifference / referencePrice);
-
-		// Convert to degrees if needed (multiply by 180/PI)
-		double degrees = Math.toDegrees(radians);
-
-		boolean consolidation = Math.abs(degrees) <= 1;
-
-		if (!consolidation)
-			return false;
-
-		double latestClose1 = stockDataList.get(0).getClose();
-		double previousClose1 = stockDataList.get(numDays - 1).getClose();
-
-		double percentageChange = ((latestClose1 - previousClose1) / previousClose1) * 100;
-
-		consolidation = Math.abs(percentageChange) <= pct;
-
-		if (!consolidation)
-			return false;
-
-		if (!exceedsThreshold(stockDataList, numDays, thresholdPct)) {
-			StockDataInfo sd = new StockDataInfo(stockDataList);
-			Pattern pattern = new Pattern();
-			String type = "Consolidation";
-			pattern.setPatternName(type);
-			pattern.setStockData(stockDataList.get(0));
-			pattern.setHead(sd.head_0);
-			pattern.setTail(sd.tail_0);
-			pattern.setBody0(sd.body_0);
-			pattern.setBbValues(bbValues);
-			// double percentageChange = ((latestClose - previousClose) / previousClose) *
-			// 100;
-			pattern.setRangePct(degrees);
-			String watchListName = getWatchlistForSymbol(symbol);
-			int rank = 0;
-			String rankStr = "";
-			if (StringUtils.isNotEmpty(watchListName)) {
-				rank = rank + 2;
-				rankStr = "WatchList Stock : " + watchListName + " ";
-			} else
-				rank = numDays;
-			rankStr += "sideways -> degrees:" + degrees + " percentageChange:" + percentageChange + " numDays:"
-					+ numDays;
-			pattern.setRankStr(rankStr);
-			pattern.setRank(rank);
-
-			patternResults.computeIfAbsent(type, k -> new ArrayList<>()).add(pattern);
-
-			return true;
-		} else {
-			// numDays++;
-			// return newconsolidation(symbol,stockDataList,numDays,pct,thresholdPct);
-		}
-		return false;
-
-	}
-
-	private boolean checkPurlpleDotConsolidation(String symbol, List<StockData> stockDataList) {
-
-		if (symbol.contains("ETF") || symbol.contains("BEES") || isETFStock(symbol) || symbol.contains("LIQUID")
-				|| symbol.endsWith("LIQ") || symbol.endsWith("GOLD") || symbol.endsWith("ADD")
-				|| symbol.contains("NIFTY") || symbol.endsWith("SENSEX"))
-			return false;
-
-		int lastBigCandleIndex = findLastPurpleCandleIndex(stockDataList);
-		if (lastBigCandleIndex == -1 || lastBigCandleIndex > 5) {
-			// No big candle found
-			return false;
-		}
-
-		Pattern pattern = new Pattern();
-		pattern.setPatternName("PurpleDotConsolidation");
-
-		// Check if all days from today up to the last big candle are trading within the
-		// high and low of the big candle day
-		StockData bigDay = stockDataList.get(lastBigCandleIndex);
-		double bigCandleHigh = bigDay.getHigh();
-		double bigCandleClose = bigDay.getClose();
-		double bigCandleLow = bigDay.getLow();
-
-		int highClose = 0;
-
-		for (int i = 0; i <= 0; i++) {
-			StockData currentDay = stockDataList.get(i);
-			double currentDayClose = currentDay.getClose();
-
-			// Check if the current day's high is within 1% of the big candle's high
-			boolean highWithinTolerance = currentDayClose <= bigCandleHigh * 1.01;
-
-			if (currentDay.getClose() > bigCandleClose)
-				highClose++;
-
-			if (highClose >= 2)
-				return false;
-
-			// Check if the current day's low is within 1% of the big candle's low
-			boolean lowWithinTolerance = currentDayClose >= bigCandleLow * 0.99;
-
-			// If either the high or low is outside the tolerance, return false
-			if (!highWithinTolerance || !lowWithinTolerance) {
-				return false;
-			}
-		}
-
-		// All days are trading within the high and low of the big candle day, so it's a
-		// consolidation
-		pattern.setRankStr("Purple Dot:" + (bigDay.getDate() != null ? bigDay.getDate().toString() : ""));
-		pattern.setRank(lastBigCandleIndex);
-		String type = "PurpleDotConsolidation";
-		pattern.setPatternName(type);
-		pattern.setRank(lastBigCandleIndex);
-		pattern.setStockData(stockDataList.get(0));
-		// pattern.setRangePct(lastBigCandleIndex);
-
-		patternResults.computeIfAbsent(type, k -> new ArrayList<>()).add(pattern);
-
-		return true;
-	}
-
-	private int findLastPurpleCandleIndex(List<StockData> stockDataList) {
-		for (int i = 1; i < stockDataList.size(); i++) {
-			StockData currentDay = stockDataList.get(i);
-			if (currentDay.getClose() > currentDay.getOpen() && isPurpleCandle(currentDay)) {
-				return i;
-			}
-		}
-		// No big candle found
-		return -1;
-	}
-
-	private int findLastBigCandleIndex(List<StockData> stockDataList) {
-		for (int i = 1; i < stockDataList.size(); i++) {
-			StockData currentDay = stockDataList.get(i);
-			if (currentDay.getClose() > currentDay.getOpen() && isBigCandle(currentDay)) {
-				return i;
-			}
-		}
-		// No big candle found
-		return -1;
-	}
-
 	private boolean isPurpleCandle(StockData stockData) {
 		// Define your criteria for a big candle (e.g., 5% movement and 500,000 share
 		// volume)
@@ -2478,89 +1404,6 @@ public class DataInjestionServiceNSEImpl {
 
 		// Check if the candle has 5% movement and volume of at least 500,000
 		return percentageMovement >= movementThreshold && volume >= volumeThreshold;
-	}
-
-	private boolean isBigCandle(StockData stockData) {
-		// Define your criteria for a big candle (e.g., 5% movement and 500,000 share
-		// volume)
-		double movementThreshold = 0.03; // 5%
-
-		double close = stockData.getClose();
-		double open = stockData.getOpen();
-
-		// Calculate the percentage movement
-		double percentageMovement = Math.abs((close - open) / open);
-
-		// Check if the candle has 5% movement
-		return percentageMovement >= movementThreshold;
-	}
-
-	private boolean exceedsThreshold(List<StockData> stockDataList, int numDays, double thresholdPct) {
-		return false;
-		/*
-		 * elgiequip jan 12 not coming coz index 4 has a big up day and since numdays is
-		 * 5, it exited. need to rework for (int i = 0; i < numDays; i++) { StockData
-		 * stockData = stockDataList.get(i); double priceChange =
-		 * Math.abs(stockData.getClose() - stockData.getOpen()); double
-		 * priceChangePercentage = (priceChange / stockData.getOpen()) * 100; if
-		 * (priceChangePercentage > thresholdPct) { return true; } } return false;
-		 */
-	}
-
-	private boolean isFirstHigherLow(String symbol, List<StockData> stockDataList) {
-		if (stockDataList.size() < 30) {
-			// Cannot find swings if there are less than 3 data points
-			return false;
-		}
-
-		int pointBIndex = -1;
-
-		// Finding point C (latest price)
-		StockData pointC = stockDataList.get(0);
-		if (pointC.getClose() < pointC.getOpen() || pointC.getClose() > bbValues.getMa_50())
-			return false;
-
-		// Finding point B (first swing high)
-		for (int i = 1 + 2; i < 30; i++) {
-			StockData current = stockDataList.get(i);
-			if (current.getSwingType().equals("H") && current.getHigh() > pointC.getHigh()) {
-				pointBIndex = i;
-				StockData pointB = stockDataList.get(pointBIndex);
-				if (isPointAFound(stockDataList, pointBIndex, pointC, pointB))
-					break;
-			}
-		}
-
-		if (pointBIndex == -1) {
-			// No swing high found, return false
-			return false;
-		}
-
-		return false;
-	}
-
-	private boolean isPointAFound(List<StockData> stockDataList, int pointBIndex, StockData pointC, StockData pointB) {
-		// Finding point A (first swing low after point B)
-		for (int i = pointBIndex + 2; i < stockDataList.size(); i++) {
-			StockData pointA = stockDataList.get(i);
-			if (pointA.getSwingType().equals("L") && pointA.getLow() < stockDataList.get(pointBIndex).getLow()) {
-				// Found point A
-				if (pointA.getClose() < pointB.getClose() && pointB.getClose() > pointC.getClose()
-						&& pointA.getLow() < pointC.getLow()) {
-					String type = "First Higher Low";
-					Pattern pattern = new Pattern();
-					pattern.setPatternName(type);
-					pattern.setStockData(stockDataList.get(0));
-					String rankStr = "Swing C:" + pointC.getDate().toString() + " Swing B:"
-							+ pointB.getDate().toString() + " Swing A:" + pointA.getDate().toString();
-					pattern.setRank(i * -1);
-					pattern.setRankStr(rankStr);
-					patternResults.computeIfAbsent(type, k -> new ArrayList<>()).add(pattern);
-					return true;
-				}
-			}
-		}
-		return false;
 	}
 
 	private void markSwingHighsAndLows(List<StockData> stockDataList) {
@@ -2973,19 +1816,7 @@ public class DataInjestionServiceNSEImpl {
 		if (pattern.getDate() != null)
 			date = pattern.getDate();
 
-		// Check if a record with the same symbol and pattern name already exists
-		List<Pattern> existingPatternList = patternRepository.findBySymbolAndPatternName(symbol, patternName);
-
-		/*
-		 * if (existingPatternList != null && existingPatternList.size() > 0) { //
-		 * Update the existing record Pattern existing = existingPatternList.get(0);
-		 * existing.setDate(date); existing.setRankStr(pattern.getRankStr());
-		 * existing.setChangePct(pattern.getChangePct());
-		 * existing.setGapupPct(pattern.getGapupPct()); // Update other fields...
-		 * patternRepository.save(existing);
-		 * 
-		 * } else
-		 */ {
+		{
 			// Save a new record
 			if (sd != null)
 				pattern.setClose(new BigDecimal(sd.close_0));
@@ -3049,20 +1880,6 @@ public class DataInjestionServiceNSEImpl {
 		return goldenStocks.contains(symbol);
 	}
 
-	private void initializeNFOStocks() {
-		String nfoFilePath = "C:\\\\Users\\\\USER\\\\OneDrive - RamGenix\\\\ASX\\NFO.txt";
-		try (BufferedReader reader = new BufferedReader(new FileReader(nfoFilePath))) {
-			String line;
-			while ((line = reader.readLine()) != null) {
-				// Assuming each line in the file contains a stock symbol
-				nfoStocks.add(line.trim());
-			}
-		} catch (IOException e) {
-			e.printStackTrace();
-			// Handle file reading error
-		}
-	}
-
 	public Set<String> initializeGoldenStocks() {
 		goldenStocks.clear();
 		Iterable<Pattern> allPatterns = patternRepository.findAll();
@@ -3070,20 +1887,6 @@ public class DataInjestionServiceNSEImpl {
 			goldenStocks.add(pattern.getSymbol());
 		}
 		return goldenStocks;
-	}
-
-	private void initializeETFStocks() {
-		String nfoFilePath = "C:\\\\Users\\\\USER\\\\OneDrive - RamGenix\\\\ASX\\ETF.txt";
-		try (BufferedReader reader = new BufferedReader(new FileReader(nfoFilePath))) {
-			String line;
-			while ((line = reader.readLine()) != null) {
-				// Assuming each line in the file contains a stock symbol
-				etfStocks.add(line.trim());
-			}
-		} catch (IOException e) {
-			e.printStackTrace();
-			// Handle file reading error
-		}
 	}
 
 	private BBValues calculateBBAndMaValues(String symbol, List<StockData> stockDataList, int startIndex) {
@@ -3162,9 +1965,6 @@ public class DataInjestionServiceNSEImpl {
 		bbValues.setUpper(bbValues.getMa_20() + (sd * 1.8));
 		bbValues.setLower(bbValues.getMa_20() - (sd * 1.8));
 
-		bbValues.setFiftyTwoWeekHigh(find52WeekHigh(stockDataList));
-		bbValues.setFiftyTwoWeekLow(find52WeekLow(stockDataList));
-
 		return bbValues;
 	}
 
@@ -3175,8 +1975,6 @@ public class DataInjestionServiceNSEImpl {
 		stockDataMap.forEach((symbol, stockDataList) -> {
 			processForSymbol(stockDataMap, symbol, 51);
 		});
-
-		// initializeGoldenStocks();
 	}
 
 	private void processForSymbol(Map<String, List<StockData>> stockDataMap, String symbol, int times) {
@@ -3200,69 +1998,13 @@ public class DataInjestionServiceNSEImpl {
 					processingDate = newDataList.get(0).getDate();
 				}
 
-				// Process the new data list
-				// isNew52WeekHigh(newDataList);
-				// findOneMonthHighStocks(newDataList);
 				if (!volumeShockersFound)
 					volumeShockersFound = findVolumeShockers(symbol, newDataList);
 				findPurpleDotStocks(symbol, newDataList);
-				// ubb(symbol, newDataList);
 				findGapUpStocks(symbol, newDataList);
 				findPowerUpCandleStocks(symbol, newDataList);
-				// findtwoLynch(symbol, newDataList);
 			}
 		}
-	}
-
-	public void getVolumeShockersWithinLast10Days() {
-		List<String> patternNames = Arrays.asList("Gapup", "PowerUpCandle", "PurpleDot", "VolumeShockers");
-		LocalDate endDate = LocalDate.now();
-		LocalDate startDate = endDate;
-		int businessDaysToSubtract = 21;
-
-		while (businessDaysToSubtract > 0) {
-			startDate = startDate.minusDays(1);
-			if (startDate.getDayOfWeek() != DayOfWeek.SATURDAY && startDate.getDayOfWeek() != DayOfWeek.SUNDAY) {
-				businessDaysToSubtract--;
-			}
-		}
-
-		List<Pattern> results = patternRepository.findDistinctByPatternNameInAndDateRange(patternNames, startDate,
-				endDate);
-
-		for (Pattern pattern : results) {
-			if (patternResultsSet.contains(pattern.getSymbol()))
-				continue;
-
-			List<StockData> stockDataList = stockDataMap.get(pattern.getSymbol());
-			if (stockDataList == null || stockDataList.isEmpty())
-				continue;
-			StockDataInfo sd = new StockDataInfo(stockDataList);
-
-			if (sd.volume_0 < 300000)
-				continue;
-
-			BBValues bb = calculateBBAndMaValues(pattern.getSymbol(), stockDataList, 0);
-			/*
-			 * if (bb == null || bb != null && sd.close_0 > bb.getMa_50() && sd.close_0 >
-			 * bb.getMa_50() && bb.getMa_20() > bb.getMa_50())
-			 */ {
-				String type = "SuperPatterns";
-
-				StockData sd1 = new StockData();
-				sd1.setSymbol(pattern.getSymbol());
-				pattern.setStockData(sd1);
-				pattern.setMaDistance(sd.getClose_0() - bb.getMa_10());
-				String rankStr = "Pattern:" + pattern.getPatternName() + " On:" + pattern.getDate() + " MA10 distance "
-						+ Double.toString(pattern.getMaDistance());
-				pattern.setRankStr(rankStr);
-				patternResults.computeIfAbsent(type, k -> new ArrayList<>()).add(pattern);
-				patternResultsSet.add(pattern.getSymbol());
-				// savePattern(pattern, type);
-
-			}
-		}
-
 	}
 
 	public void getRestingStocksAfterBurst() {
@@ -3283,8 +2025,6 @@ public class DataInjestionServiceNSEImpl {
 
 		patternResultsSet.clear();
 		for (Pattern pattern : results) {
-			if (patternResultsSet.contains(pattern.getSymbol()))
-				continue;
 
 			if (pattern.getDate().equals(processingDate))
 				continue;
@@ -3297,10 +2037,6 @@ public class DataInjestionServiceNSEImpl {
 				continue;
 
 			StockDataInfo sd = new StockDataInfo(stockDataList);
-
-			/*
-			 * if (sd.volume_0 < 300000) continue;
-			 */
 
 			int indexFound = -1;
 
@@ -3329,22 +2065,18 @@ public class DataInjestionServiceNSEImpl {
 				continue;
 
 			BBValues bb = calculateBBAndMaValues(pattern.getSymbol(), stockDataList, 0);
-			/*
-			 * if (bb == null || bb != null && sd.close_0 > bb.getMa_50() && sd.close_0 >
-			 * bb.getMa_50() && bb.getMa_20() > bb.getMa_50())
-			 */ {
+			{
 				String type = "BurstRetracement";
 
 				StockData sd1 = new StockData();
 				sd1.setSymbol(pattern.getSymbol());
 				pattern.setStockData(sd1);
-				pattern.setMaDistance(sd.getClose_0() - bb.getMa_10());
+				pattern.setRank(sd.getClose_0() - bb.getMa_10());
 				String rankStr = "Pattern:" + pattern.getPatternName() + " On:" + pattern.getDate() + " MA10 distance "
 						+ Double.toString(pattern.getMaDistance());
 				pattern.setRankStr(rankStr);
 				patternResults.computeIfAbsent(type, k -> new ArrayList<>()).add(pattern);
 				patternResultsSet.add(pattern.getSymbol());
-				// savePattern(pattern, type);
 
 			}
 		}
