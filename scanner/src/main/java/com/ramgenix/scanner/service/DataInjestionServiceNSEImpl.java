@@ -49,6 +49,10 @@ public class DataInjestionServiceNSEImpl {
 
 	private static final Logger LOG = LoggerFactory.getLogger(DataInjestionServiceNSEImpl.class);
 	private static final String BASE_DIR = "C:\\Users\\USER\\OneDrive - RamGenix\\ASX\\";
+	private static final double MIN_POST_BREAKOUT_MOVE_PERCENT = 7.0;
+	private static final double RETRACEMENT_TOLERANCE_PERCENT = 5.0; // +/- tolerance around the target
+	private static final int BREAKOUT_DAYS_WINDOW = 50;
+	private static final int SH_CANDIDATE_20_DAY_LOOKBACK = 20;
 
 	// Market enum
 	public enum Market {
@@ -69,6 +73,27 @@ public class DataInjestionServiceNSEImpl {
 			this.outputDirectory = outputDirectory;
 			this.watchlistDirectory = watchlistDirectory;
 			this.country = country;
+		}
+	}
+
+	/**
+	 * Simple generic Pair class to return two values from a method.
+	 */
+	private static class Pair<K, V> {
+		private final K key;
+		private final V value;
+
+		public Pair(K key, V value) {
+			this.key = key;
+			this.value = value;
+		}
+
+		public K getKey() {
+			return key;
+		}
+
+		public V getValue() {
+			return value;
 		}
 	}
 
@@ -127,7 +152,7 @@ public class DataInjestionServiceNSEImpl {
 	Map<String, List<Pattern>> patternResults = new ConcurrentHashMap<>();
 	Set<String> patternResultsSet = new HashSet<>();
 	String outputFilePath = "C:\\Users\\USER\\OneDrive - RamGenix\\ASX\\newhtml\\";
-	private String stockchartsurl = "p=D&yr=0&mn=6&dy=0&i=t5269193626c&r=1751541526226";
+	private String stockchartsurl = "p=D&yr=0&mn=6&dy=0&i=t7781585257c&r=1751607442369";
 	Set<String> inputWatchList = new HashSet<>();
 	String watchlist = "";
 
@@ -174,9 +199,9 @@ public class DataInjestionServiceNSEImpl {
 				}
 
 				boolean goldenStocksOnly = false;
-				if (!patternResultsSet.contains(symbol)) {
+				{
 					if (findBullishPatternsAdvanced(symbol, stockDataList, goldenStocksOnly)) {
-						patternResultsSet.add(symbol);
+
 					}
 					checkBearishPatterns(symbol, stockDataList);
 					upday(symbol, stockDataList);
@@ -279,7 +304,7 @@ public class DataInjestionServiceNSEImpl {
 	private boolean symbolCheck(Market market, List<StockData> stockDataList) {
 		if (market == Market.NSE) {
 			for (StockData sd : stockDataList) {
-				if (!"EQ".equals(sd.getSeries())) {
+				if (!"EQ".equals(sd.getSeries()) && !"BE".equals(sd.getSeries())) {
 					return false;
 				}
 			}
@@ -447,7 +472,7 @@ public class DataInjestionServiceNSEImpl {
 							// LocalDate localDate = LocalDate.parse(lowercaseDateString, formatter);
 							stockData.setDate(DateFormatChecker.processDate(lowercaseDateString));
 
-							if (!fi.getSctySrs().equals("EQ")) {
+							if (!fi.getSctySrs().equals("EQ") && !fi.getSctySrs().equals("BE")) {
 								continue;
 							}
 
@@ -514,14 +539,9 @@ public class DataInjestionServiceNSEImpl {
 	private boolean findBullishPatternsAdvanced(String symbol, List<StockData> stockDataList,
 			boolean superStrongStocksOnly) {
 
-		if (!"FINEORG".equals(symbol)) {
-			// return;
-		}
-
-		StockDataInfo sd = new StockDataInfo(stockDataList);
-
 		findNearSupportStocks(symbol, stockDataList);
-		findBreakoutBars(symbol, stockDataList);
+		// findBreakoutBars(symbol, stockDataList);
+		findBreakoutRetracementStocks(symbol, stockDataList);
 		findBullFlagStocks(symbol, stockDataList);
 		findAscendingTriangleStocks(symbol, stockDataList);
 
@@ -674,7 +694,216 @@ public class DataInjestionServiceNSEImpl {
 		return true;
 	}
 
+	/**
+	 * Finds the MOST RECENT "breakout retracement stock" where the price retraces
+	 * back to its original breakout level (shCandidate.getHigh()), with an
+	 * additional check for "fresh" retracement path. The original swing high
+	 * candidate must also be the highest high in the 20 days preceding it.
+	 *
+	 * The input list of StockData is expected to be in reverse chronological order
+	 * (index 0 is the latest data, last index is the oldest data).
+	 * 
+	 * @param symbol
+	 *
+	 * @param stockDataList A list of StockData objects for a specific stock,
+	 *                      ordered from latest to oldest.
+	 * @return A list containing a single StockData object representing the most
+	 *         recent original swing high that meets all criteria, or an empty list
+	 *         if none is found.
+	 */
+	public boolean findBreakoutRetracementStocks(String symbol, List<StockData> stockDataList) {
+
+		final String patternType = "BreakoutBars";
+
+		if (!symbol.equals("RPOWER")) {
+			// return false;
+		}
+
+		// Basic validation: Ensure enough data for all checks.
+		if (stockDataList == null
+				|| stockDataList.size() < (BREAKOUT_DAYS_WINDOW - 1) + SH_CANDIDATE_20_DAY_LOOKBACK + 1) {
+			// System.out.println("Not enough data to perform analysis. Need at least "
+			// + ((BREAKOUT_DAYS_WINDOW - 1) + SH_CANDIDATE_20_DAY_LOOKBACK + 1) + "
+			// days.");
+			return false;
+		}
+
+		double currentClose = stockDataList.get(0).getClose();
+
+		// Outer loop: Iterate through potential original swing high candidates
+		// (`shCandidate`).
+		// 'i' goes from index 5 (6th most recent day) up to BREAKOUT_DAYS_WINDOW - 1
+		// (49th index, 50th day ago).
+		for (int i = 5; i < BREAKOUT_DAYS_WINDOW; i++) {
+			StockData shCandidate = stockDataList.get(i);
+
+			if ("H".equals(shCandidate.getSwingType())) {
+				double originalSwingHighPrice = shCandidate.getHigh();
+
+				// Check: shCandidate must be the highest high in the 20 days prior to its
+				// index.
+				boolean isHighestInPrevious20Days = true;
+				for (int k = i + 1; k < Math.min(stockDataList.size(), i + SH_CANDIDATE_20_DAY_LOOKBACK + 1); k++) {
+					if (stockDataList.get(k).getHigh() >= shCandidate.getHigh()) {
+						isHighestInPrevious20Days = false;
+						break;
+					}
+				}
+
+				if (isHighestInPrevious20Days) {
+					int breakoutCandleIndex = -1;
+
+					for (int j = i - 1; j >= 0; j--) {
+						StockData currentCandle = stockDataList.get(j);
+						if (currentCandle.getClose() > originalSwingHighPrice) {
+							breakoutCandleIndex = j;
+							break;
+						}
+					}
+
+					if (breakoutCandleIndex != -1) {
+						boolean moved10PercentUp = false;
+						for (int k = breakoutCandleIndex; k >= 0; k--) {
+							if (stockDataList.get(k).getClose() >= originalSwingHighPrice
+									* (1 + MIN_POST_BREAKOUT_MOVE_PERCENT / 100)) {
+								moved10PercentUp = true;
+								break;
+							}
+						}
+
+						if (moved10PercentUp) {
+							Optional<Pair<StockData, Integer>> highestPostBreakoutSwingHighOptWithIndex = findHighestSwingHighAfterIndex(
+									symbol, stockDataList, breakoutCandleIndex);
+
+							if (highestPostBreakoutSwingHighOptWithIndex.isPresent()) {
+								Pair<StockData, Integer> pair = highestPostBreakoutSwingHighOptWithIndex.get();
+								int highestPostBreakoutSwingHighIndex = pair.getValue();
+
+								// NEW CHECK: After the breakout candle, if any candle from its index
+								// till the highestPostBreakoutHighIndex has closed below the breakout candle's
+								// close,
+								// then this breakout is invalid.
+								boolean isValidBreakoutPath = true;
+								// Get the close price of the breakout candle for comparison.
+								double breakoutClosePrice = stockDataList.get(breakoutCandleIndex).getClose();
+
+								// Iterate from the breakout candle's index down to the
+								// highestPostBreakoutHighIndex.
+								// This covers all candles in the path from breakout to the highest point
+								// achieved.
+								for (int pathCheckIndex = breakoutCandleIndex; pathCheckIndex >= highestPostBreakoutSwingHighIndex; pathCheckIndex--) {
+									// If any candle in this path closed below the breakout candle's close, it's
+									// invalid.
+									if (stockDataList.get(pathCheckIndex).getClose() < breakoutClosePrice) {
+										isValidBreakoutPath = false;
+										break; // Found an invalid close, no need to check further.
+									}
+								}
+
+								if (isValidBreakoutPath) {
+
+									// Check: Price should not have retraced back to original breakout level
+									// except for the last 3 bars (indices 0, 1, 2).
+									boolean freshRetracementPath = true;
+									for (int retracementCheckIndex = highestPostBreakoutSwingHighIndex; retracementCheckIndex >= 3; retracementCheckIndex--) {
+										if (stockDataList.get(retracementCheckIndex)
+												.getClose() <= originalSwingHighPrice) {
+											freshRetracementPath = false;
+											break;
+										}
+									}
+
+									if (freshRetracementPath) {
+										// CRITICAL CHANGE HERE: targetRetracementPrice is now directly
+										// shCandidate.getHigh()
+										// as the target is to retrace *back to* the breakout level itself.
+										double targetRetracementPrice = shCandidate.getHigh();
+
+										// The tolerance is applied around this target price.
+										double lowerBound = targetRetracementPrice
+												* (1 - RETRACEMENT_TOLERANCE_PERCENT / 100);
+										double upperBound = targetRetracementPrice
+												* (1 + RETRACEMENT_TOLERANCE_PERCENT / 100);
+
+										if (currentClose >= lowerBound && currentClose <= upperBound) {
+											System.out
+													.println(shCandidate.getSymbol() + " high:" + shCandidate.getHigh()
+															+ " date:" + shCandidate.getDate().toString());
+											StockDataInfo sd = new StockDataInfo(stockDataList);
+											Pattern pattern = Pattern.builder().patternName(patternType)
+													.stockData(stockDataList.get(0)).head(sd.head_0).tail(sd.tail_0)
+													.body0(sd.body_0).build();
+
+											double actualRetracementPercent = ((originalSwingHighPrice - currentClose)
+													/ originalSwingHighPrice) * 100;
+
+											String breakoutDateStr = stockDataList.get(breakoutCandleIndex).getDate()
+													.toString();
+
+											// Construct the rankStr directly using String.format.
+											// Displaying dates for shCandidate, breakout, and highestPostBreakoutHigh.
+											String rankStr = String.format(
+													"BO_Level: %.2f (Date: %s), Breakout_Date: %s, HPH: %.2f (Date: %s), Retracement_Pct: %.2f%%",
+													originalSwingHighPrice, shCandidate.getDate().toString(), // Date of
+																												// the
+																												// shCandidate
+																												// (original
+																												// breakout
+																												// level)
+													breakoutDateStr, // Date of the actual breakout
+													pair.getKey().getHigh(), // High of the highestPostBreakoutSwingHigh
+													pair.getKey().getDate().toString(), // Date of the
+																						// highestPostBreakoutSwingHigh
+													actualRetracementPercent);
+
+											pattern.setRankStr(rankStr);
+											pattern.setRank(calculateADR(stockDataList, 20));
+											patternResults.computeIfAbsent(patternType, k -> new ArrayList<>())
+													.add(pattern);
+											return true;
+										}
+									}
+
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Helper method to find the highest swing high from a specified starting index
+	 * (chronologically older) up to the latest data (index 0).
+	 */
+	private Optional<Pair<StockData, Integer>> findHighestSwingHighAfterIndex(String symbol,
+			List<StockData> stockDataList, int startIndex) {
+		StockData highestSwingHigh = null;
+		int highestSwingHighIndex = -1;
+
+		for (int k = startIndex; k >= 0; k--) {
+			StockData candle = stockDataList.get(k);
+			if ("H".equals(candle.getSwingType())) {
+				if (highestSwingHigh == null || candle.getHigh() > highestSwingHigh.getHigh()) {
+					highestSwingHigh = candle;
+					highestSwingHighIndex = k;
+				}
+			}
+		}
+		if (highestSwingHigh != null) {
+			return Optional.of(new Pair<>(highestSwingHigh, highestSwingHighIndex));
+		} else {
+			return Optional.empty();
+		}
+	}
+
 	private boolean findBreakoutBars(String symbol, List<StockData> stockDataList) {
+
+		if (!symbol.equals("GOKULAGRO"))
+			return false;
+
 		if (stockDataList == null || stockDataList.isEmpty() || !volumeCheck(stockDataList)
 				|| !priceCheck(stockDataList)) {
 			return false;
@@ -1776,6 +2005,7 @@ public class DataInjestionServiceNSEImpl {
 					backgroundClass = purpleDot ? "style=\"background-color: #dda0dd;\"" : "";
 				}
 				writer.println("<p class=\"card-text\" " + backgroundClass + ">Rank:" + rank + "</p>");
+				writer.println("<p class=\"card-text\" " + backgroundClass + ">Rank Str:" + rankStr + "</p>");
 
 				// Add stock chart image
 				writer.println("<img src=\"https://stockcharts.com/c-sc/sc?s=" + symbol
