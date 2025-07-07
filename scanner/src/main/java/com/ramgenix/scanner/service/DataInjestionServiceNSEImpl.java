@@ -14,6 +14,7 @@ import java.time.format.DateTimeFormatterBuilder;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -53,6 +54,17 @@ public class DataInjestionServiceNSEImpl {
 	private static final double RETRACEMENT_TOLERANCE_PERCENT = 5.0; // +/- tolerance around the target
 	private static final int BREAKOUT_DAYS_WINDOW = 50;
 	private static final int SH_CANDIDATE_20_DAY_LOOKBACK = 20;
+
+	// Constants for bull flag detection parameters
+	private static final double BULL_FLAG_FLAGPOLE_BURST_THRESHOLD = 1.19; // Minimum price increase for swing high
+																			// (19%)
+	private static final double BULL_FLAG_CONSOLIDATION_LOWER_THRESHOLD = 0.90; // Lower boundary for consolidation
+																				// range (90% of swing high)
+	private static final double BULL_FLAG_CONSOLIDATION_UPPER_THRESHOLD = 1.10; // Upper boundary for consolidation
+																				// range (110% of swing high)
+	private static final int BULL_FLAG_FLAGPOLE_HIGH_MIN_DISTANCE_FROM_CURRENT = 4; // Minimum bars between flagpole and
+																					// current
+	// data
 
 	// Market enum
 	public enum Market {
@@ -97,6 +109,132 @@ public class DataInjestionServiceNSEImpl {
 		}
 	}
 
+	// You can make this a static nested class within your StockAnalyzer or a
+	// separate class.
+	static class SwingPoint {
+		LocalDate date;
+		double price; // For swing high, this will be the high of the candle
+		String type; // "H" for Swing High
+		int originalIndex; // Its index in the original stockDataList (reverse chronological)
+		int chronologicalX; // Calculated X-coordinate: 0 for oldest bar, N-1 for newest bar
+
+		public SwingPoint(LocalDate date, double price, String type, int originalIndex, int totalBars) {
+			this.date = date;
+			this.price = price;
+			this.type = type;
+			this.originalIndex = originalIndex;
+			// This is the calculation for chronologicalX:
+			// If originalIndex 0 is the latest bar (N-1), then chronologicalX is (N-1).
+			// If originalIndex N-1 is the oldest bar (0), then chronologicalX is (0).
+			this.chronologicalX = totalBars - 1 - originalIndex;
+		}
+
+		// Getters for all fields
+		public LocalDate getDate() {
+			return date;
+		}
+
+		public double getPrice() {
+			return price;
+		}
+
+		public String getType() {
+			return type;
+		}
+
+		public int getOriginalIndex() {
+			return originalIndex;
+		}
+
+		// This is the method that was likely missing or not correctly included in your
+		// SwingPoint class:
+		public int getChronologicalX() {
+			return chronologicalX;
+		}
+
+		@Override
+		public String toString() {
+			return "SwingPoint{" + "date=" + date + ", price=" + String.format("%.2f", price) + ", type='" + type + '\''
+					+ ", originalIndex=" + originalIndex + ", chronologicalX=" + chronologicalX + '}';
+		}
+	}
+
+	// Assuming SwingPoint class is already defined
+
+	static class Trendline {
+		SwingPoint startPoint; // The chronologically older (leftmost) swing high
+		SwingPoint endPoint; // The chronologically newer (rightmost) swing high
+		double slope;
+		double intercept;
+		String type; // "Descending"
+		int validationTouchCount = 0; // NEW FIELD: To store the count of additional touches
+
+		public Trendline(SwingPoint point1, SwingPoint point2, String type) {
+			if (point1.getChronologicalX() > point2.getChronologicalX()) {
+				this.startPoint = point2;
+				this.endPoint = point1;
+			} else {
+				this.startPoint = point1;
+				this.endPoint = point2;
+			}
+			this.type = type;
+			calculateLineEquation();
+		}
+
+		private void calculateLineEquation() {
+			if (endPoint.getChronologicalX() == startPoint.getChronologicalX()) {
+				this.slope = 0;
+				this.intercept = startPoint.getPrice();
+				return;
+			}
+			this.slope = (endPoint.getPrice() - startPoint.getPrice())
+					/ (double) (endPoint.getChronologicalX() - startPoint.getChronologicalX());
+			this.intercept = startPoint.getPrice() - this.slope * startPoint.getChronologicalX();
+		}
+
+		public double getPriceAtChronologicalX(int chronologicalX) {
+			return this.slope * chronologicalX + this.intercept;
+		}
+
+		// Getters for properties
+		public SwingPoint getStartPoint() {
+			return startPoint;
+		}
+
+		public SwingPoint getEndPoint() {
+			return endPoint;
+		}
+
+		public double getSlope() {
+			return slope;
+		}
+
+		public double getIntercept() {
+			return intercept;
+		}
+
+		public String getType() {
+			return type;
+		}
+
+		// NEW Getters and Setters for validationTouchCount
+		public int getValidationTouchCount() {
+			return validationTouchCount;
+		}
+
+		public void setValidationTouchCount(int validationTouchCount) {
+			this.validationTouchCount = validationTouchCount;
+		}
+
+		@Override
+		public String toString() {
+			return "Trendline [" + type + "]" + " Start: " + startPoint.getDate() + " (Price: "
+					+ String.format("%.2f", startPoint.getPrice()) + ")" + ", End: " + endPoint.getDate() + " (Price: "
+					+ String.format("%.2f", endPoint.getPrice()) + ")" + ", Slope: " + String.format("%.4f", slope)
+					+ ", Touches: " + validationTouchCount; // Display the touch count
+		}
+	}
+
 	private final Map<Market, MarketConfig> marketConfigs;
 
 	Set<String> hammerStrings = new HashSet<>();
@@ -129,7 +267,7 @@ public class DataInjestionServiceNSEImpl {
 		patternToFileNameMap.put("Hammer", "1_Hammer");
 		patternToFileNameMap.put("NearSupport", "NearSupport");
 		patternToFileNameMap.put("BreakoutBars", "ResistanceTurnedSupport");
-		patternToFileNameMap.put("BullFlag", "BullFlag");
+		patternToFileNameMap.put("BULL_FLAG", "BullFlag");
 		patternToFileNameMap.put("AscendingTriangle", "AscendingTriangle");
 
 		this.marketConfigs = new HashMap<>();
@@ -152,7 +290,7 @@ public class DataInjestionServiceNSEImpl {
 	Map<String, List<Pattern>> patternResults = new ConcurrentHashMap<>();
 	Set<String> patternResultsSet = new HashSet<>();
 	String outputFilePath = "C:\\Users\\USER\\OneDrive - RamGenix\\ASX\\newhtml\\";
-	private String stockchartsurl = "p=D&yr=0&mn=6&dy=0&i=t7781585257c&r=1751607442369";
+	private String stockchartsurl = "p=D&yr=0&mn=6&dy=0&i=t0134415720c&r=1751859357029";
 	Set<String> inputWatchList = new HashSet<>();
 	String watchlist = "";
 
@@ -188,7 +326,28 @@ public class DataInjestionServiceNSEImpl {
 		MarketConfig config = marketConfigs.get(market);
 		stockDataMap.forEach((symbol, stockDataList) -> {
 			if (inputWatchList.isEmpty() || inputWatchList.contains(symbol)) {
-				markSwingHighsAndLows(stockDataList);
+
+				markSwingHighsAndLows(symbol, stockDataList);
+				/*
+				 * List<SwingPoint> refinedHighs =
+				 * getRefinedDescendingSwingHighs(stockDataList);
+				 * 
+				 * System.out.println("\nStep 3: Generating potential descending trendlines..."
+				 * ); // You'll need to choose sensible values for these parameters: // A
+				 * typical descending trendline has a negative slope. // -5.0 degrees is a
+				 * gentle downward slope. -45.0 is much steeper. // 0.5% minimum price drop
+				 * ensures the two points are meaningfully different. double
+				 * minSlopeAngleDegrees = -5.0; // Example: at least 5 degrees downward slope
+				 * double minPriceDropPercent = 0.5; // Example: at least 0.5% price drop
+				 * between points
+				 * 
+				 * List<Trendline> potentialTrendlines =
+				 * generateDescendingTrendlines(refinedHighs, minSlopeAngleDegrees,
+				 * minPriceDropPercent); System.out .println("Found " +
+				 * potentialTrendlines.size() + " potential trendlines (before validation):");
+				 * for (Trendline tl : potentialTrendlines) { System.out.println("  " + tl); }
+				 */
+
 				bbValues = calculateBBAndMaValues(symbol, stockDataList, 0);
 
 				if (volumeCheck(stockDataList) && priceCheck(stockDataList) && symbolCheck(market, stockDataList)) {
@@ -219,6 +378,50 @@ public class DataInjestionServiceNSEImpl {
 		patternToFileNameMap.forEach((patternName, fileName) -> saveSortedPatterns(market, patternName, fileName));
 
 		return null;
+	}
+
+	private boolean findBullishPatternsAdvanced(String symbol, List<StockData> stockDataList,
+			boolean superStrongStocksOnly) {
+
+		/*
+		 * private static final int BULL_FLAG_MINIMUM_BARS = 5; // Minimum number of
+		 * bars required for valid input private static final double
+		 * BULL_FLAG_FLAGPOLE_THRESHOLD = 1.19; // Minimum price increase for swing high
+		 * (19%) private static final double BULL_FLAG_CONSOLIDATION_LOWER_THRESHOLD =
+		 * 0.90; // Lower boundary for consolidation // range (90% of swing high)
+		 * private static final double BULL_FLAG_CONSOLIDATION_UPPER_THRESHOLD = 1.10;
+		 * // Upper boundary for consolidation // range (110% of swing high) private
+		 * static final int BULL_FLAG_MINIMUM_SWING_HIGH_INDEX = 6; // Minimum swing
+		 * high index to ensure sufficient
+		 * 
+		 */
+
+//		findNearSupportStocks(symbol, stockDataList);
+		// findBreakoutRetracementStocks(symbol, stockDataList);
+		findBullFlagStocksAdvanced(symbol, stockDataList, BULL_FLAG_FLAGPOLE_BURST_THRESHOLD,
+				BULL_FLAG_CONSOLIDATION_LOWER_THRESHOLD, BULL_FLAG_CONSOLIDATION_UPPER_THRESHOLD,
+				BULL_FLAG_FLAGPOLE_HIGH_MIN_DISTANCE_FROM_CURRENT, "BULL_FLAG");
+		// findAscendingTriangleStocks(symbol, stockDataList);
+
+		if (!volumeCheck(stockDataList) || !priceCheck(stockDataList))
+			return false;
+
+		boolean result = false;
+
+		result = findHammerStocks(symbol, stockDataList);
+		if (result)
+			return true;
+
+		result = pbs(symbol, stockDataList);
+
+		if (result)
+			return true;
+
+		if (!result)
+			return false;
+
+		return false;
+
 	}
 
 	private void saveSortedPatterns(Market market, String patternName, String fileName) {
@@ -533,36 +736,6 @@ public class DataInjestionServiceNSEImpl {
 		result = bbred(symbol, stockDataList);
 		if (result)
 			return;
-
-	}
-
-	private boolean findBullishPatternsAdvanced(String symbol, List<StockData> stockDataList,
-			boolean superStrongStocksOnly) {
-
-		findNearSupportStocks(symbol, stockDataList);
-		// findBreakoutBars(symbol, stockDataList);
-		findBreakoutRetracementStocks(symbol, stockDataList);
-		findBullFlagStocks(symbol, stockDataList);
-		findAscendingTriangleStocks(symbol, stockDataList);
-
-		if (!volumeCheck(stockDataList) || !priceCheck(stockDataList))
-			return false;
-
-		boolean result = false;
-
-		result = findHammerStocks(symbol, stockDataList);
-		if (result)
-			return true;
-
-		result = pbs(symbol, stockDataList);
-
-		if (result)
-			return true;
-
-		if (!result)
-			return false;
-
-		return false;
 
 	}
 
@@ -899,266 +1072,143 @@ public class DataInjestionServiceNSEImpl {
 		}
 	}
 
-	private boolean findBreakoutBars(String symbol, List<StockData> stockDataList) {
-
-		if (!symbol.equals("GOKULAGRO"))
-			return false;
-
-		if (stockDataList == null || stockDataList.isEmpty() || !volumeCheck(stockDataList)
-				|| !priceCheck(stockDataList)) {
-			return false;
-		}
-		MarketConfig config = marketConfigs.get(Market.NSE); // Default to NSE, adjust if needed
-		if (config == null)
-			return false;
-
-		final String patternType = "BreakoutBars";
-		final int maxSwingHighLookback = 50;
-		final int breakoutLevelWindow = 20;
-		final double postBreakoutThreshold = 6.0;
-		final double proximityThreshold = 5.0;
-		final int recentBarsToExclude = 3;
-
-		if (stockDataList.size() < maxSwingHighLookback + breakoutLevelWindow + 1) {
-			return false;
-		}
-
-		double currentClose = stockDataList.get(0).getClose();
-		if (currentClose == 0.0) {
-			return false;
-		}
-
-		double breakoutLevelPrice = 0.0;
-		LocalDate breakoutLevelDate = null;
-		int breakoutLevelIndex = -1;
-		double breakoutBarClose = 0.0;
-		LocalDate breakoutBarDate = null;
-		int breakoutBarIndex = -1;
-		double breakoutBarLow = 0.0;
-		double postBreakoutHigh = 0.0;
-		LocalDate postBreakoutHighDate = null;
-		int postBreakoutHighIndex = -1;
-		boolean validPullback = true;
-
-		for (int i = 1; i <= Math.min(maxSwingHighLookback, stockDataList.size() - 1); i++) {
-			StockData data = stockDataList.get(i);
-			if ("H".equals(data.getSwingType())) {
-				double high = data.getHigh();
-				boolean isHighest = true;
-				for (int j = i + 1; j <= Math.min(stockDataList.size() - 1, i + breakoutLevelWindow); j++) {
-					if (stockDataList.get(j).getHigh() > high) {
-						isHighest = false;
-						break;
-					}
-				}
-				if (isHighest) {
-					double proximityPercent = Math.abs((currentClose - high) / high) * 100;
-					if (proximityPercent <= proximityThreshold) {
-						for (int j = i - 1; j >= 0; j--) {
-							double close = stockDataList.get(j).getClose();
-							if (close > high) {
-								breakoutBarClose = close;
-								breakoutBarIndex = j;
-								breakoutBarDate = stockDataList.get(j).getDate();
-								breakoutBarLow = stockDataList.get(j).getLow();
-								postBreakoutHigh = 0.0;
-								postBreakoutHighIndex = -1;
-								postBreakoutHighDate = null;
-								for (int k = j - 1; k >= 0; k--) {
-									double currentHigh = stockDataList.get(k).getHigh();
-									if (currentHigh >= high * (1 + postBreakoutThreshold / 100)
-											&& currentHigh > postBreakoutHigh) {
-										postBreakoutHigh = currentHigh;
-										postBreakoutHighIndex = k;
-										postBreakoutHighDate = stockDataList.get(k).getDate();
-									}
-								}
-								if (postBreakoutHighIndex != -1) {
-									validPullback = true;
-									for (int k = breakoutBarIndex; k >= recentBarsToExclude; k--) {
-										double low = stockDataList.get(k).getLow();
-										if (low < breakoutBarClose) {
-											validPullback = false;
-											break;
-										}
-									}
-									if (validPullback) {
-										breakoutLevelPrice = high;
-										breakoutLevelDate = data.getDate();
-										breakoutLevelIndex = i;
-										break;
-									}
-								}
-								break;
-							}
-						}
-						if (breakoutLevelIndex != -1 && postBreakoutHighIndex != -1 && validPullback) {
-							break;
-						}
-					}
-				}
-			}
-		}
-
-		if (breakoutLevelPrice == 0.0 || breakoutBarIndex == -1 || postBreakoutHighIndex == -1 || !validPullback) {
-			return false;
-		}
-
-		StockDataInfo sd = new StockDataInfo(stockDataList);
-		Pattern pattern = Pattern.builder().patternName(patternType).stockData(stockDataList.get(0)).head(sd.head_0)
-				.tail(sd.tail_0).body0(sd.body_0).country(config.country).build();
-		String rankStr = String.format(
-				" BreakoutLevelPrice:%.2f BreakoutLevelDate:%s BreakoutBarClose:%.2f BreakoutBarDate:%s PostBreakoutHigh:%.2f PostBreakoutHighDate:%s BreakoutPercent:%.2f%% PostBreakoutPercent:%.2f%% ProximityPercent:%.2f%% CurrentPrice:%.2f",
-				breakoutLevelPrice, breakoutLevelDate != null ? breakoutLevelDate.toString() : "N/A", breakoutBarClose,
-				breakoutBarDate != null ? breakoutBarDate.toString() : "N/A", postBreakoutHigh,
-				postBreakoutHighDate != null ? postBreakoutHighDate.toString() : "N/A",
-				((breakoutBarClose - breakoutLevelPrice) / breakoutLevelPrice) * 100,
-				((postBreakoutHigh - breakoutLevelPrice) / breakoutLevelPrice) * 100,
-				Math.abs((currentClose - breakoutLevelPrice) / breakoutLevelPrice) * 100, currentClose);
-		pattern.setRankStr(rankStr);
-		pattern.setRank(calculateADR(stockDataList, 20));
-		patternResults.computeIfAbsent(patternType, k -> new ArrayList<>()).add(pattern);
-		return true;
+	// Removes all flagpole entries with the specified swing low index from the
+	// flagpole list
+	private void removeSwingLowFromFlagPoleList(List<int[]> flagpoleList, int lowIndex) {
+		flagpoleList.removeIf(pair -> pair[0] == lowIndex);
 	}
 
-	private boolean findBullFlagStocks(String symbol, List<StockData> stockDataList) {
-		if (stockDataList == null || stockDataList.isEmpty() || !priceCheck(stockDataList)) {
+	// Detects bull flag patterns for a given stock symbol and stock data list
+	private boolean findBullFlagStocksAdvanced(String symbol, List<StockData> stockDataList, double flagpoleThreshold,
+			double consolidationLowerThreshold, double consolidationUpperThreshold, int minimumSwingHighIndex,
+			String patternType) {
+		// Validate input data: check for null, empty list, price, and volume conditions
+		if (stockDataList == null || stockDataList.isEmpty() || !priceCheck(stockDataList)
+				|| !volumeCheck(stockDataList)) {
 			return false;
 		}
-		MarketConfig config = marketConfigs.get(Market.NSE); // Default to NSE, adjust if needed
-		if (config == null)
-			return false;
 
-		String type = "BullFlag";
-		double flagRangeThreshold = 10.0;
-		double priceIncreaseThreshold = 20.0;
-		double volumeIncreaseThreshold = 1.5;
-		int minFlagpoleBars = 4;
-		int maxFlagpoleBars = 15;
-		int minFlagBars = 5;
-		int maxFlagBars = 50;
-		int historicalVolumePeriod = 20;
+		// Optional filter for testing specific stock , currently disabled
+		if (!symbol.equals("TSLA")) {
+			// return false;
+		}
+
+		// Initialize variables for flagpole detection and pattern storage
+		List<int[]> flagpoleList = new ArrayList<>();
+
+		// Create StockDataInfo to extract static metrics for the entire dataset
 		StockDataInfo sd = new StockDataInfo(stockDataList);
 
-		if (stockDataList.size() < minFlagpoleBars + minFlagBars) {
-			return false;
+		// Step 1: Identify all swing lows in the dataset
+		List<Integer> swingLowIndices = new ArrayList<>();
+		for (int i = 0; i < stockDataList.size(); i++) {
+			if ("L".equals(stockDataList.get(i).getSwingType())) {
+				swingLowIndices.add(i);
+			}
 		}
 
-		double latestClose = stockDataList.get(0).getClose();
-		if (latestClose == 0.0) {
-			return false;
-		}
-
-		double flagpoleHigh = 0.0;
-		int highIndex = -1;
-		double highestSwingHigh = 0.0;
-		int highestHighIndex = -1;
-
-		for (int i = 1; i <= maxFlagBars && i < stockDataList.size(); i++) {
-			if ("H".equals(stockDataList.get(i).getSwingType())) {
-				if (stockDataList.get(i).getHigh() <= highestSwingHigh) {
-					continue;
+		// Step 2: For each swing low, find swing highs with sufficient price increase
+		for (int lowIndex : swingLowIndices) {
+			int prevLowIndex = -1; // Track previous swing low to ensure one flagpole per low
+			double swingLowPrice = stockDataList.get(lowIndex).getLow();
+			// Search backward for swing highs before the swing low
+			for (int j = lowIndex - 1; j > 0; j--) {
+				// Invalidate swing low if any prior bar's close is below the swing low's close
+				if (stockDataList.get(j).getClose() < stockDataList.get(lowIndex).getClose()) {
+					removeSwingLowFromFlagPoleList(flagpoleList, lowIndex);
+					break; // Stop processing this swing low
 				}
-
-				double currentHigh = stockDataList.get(i).getHigh();
-				double highMovement = Math.abs(currentHigh - latestClose) / latestClose * 100;
-				if (highMovement > flagRangeThreshold) {
-					return false;
-				}
-
-				for (int j = i - 1; j >= 0; j--) {
-					double highPrice = stockDataList.get(j).getHigh();
-					double lowPrice = stockDataList.get(j).getLow();
-					double highPriceMovement = Math.abs(highPrice - currentHigh) / currentHigh * 100;
-					double lowPriceMovement = Math.abs(lowPrice - currentHigh) / currentHigh * 100;
-					if (highPriceMovement > flagRangeThreshold || lowPriceMovement > flagRangeThreshold) {
-						return false;
+				// Check for swing high with at least the specified price increase from swing
+				// low
+				if ("H".equals(stockDataList.get(j).getSwingType())
+						&& stockDataList.get(j).getHigh() >= swingLowPrice * flagpoleThreshold) {
+					// Add new flagpole for this swing low if none exists
+					if (flagpoleList.isEmpty() || prevLowIndex == -1 || prevLowIndex != lowIndex) {
+						flagpoleList.add(new int[] { lowIndex, j });
+						prevLowIndex = lowIndex;
+					}
+					// Update flagpole if a higher swing high is found for the same swing low
+					else if (prevLowIndex == lowIndex && stockDataList.get(j).getHigh() > stockDataList
+							.get(flagpoleList.get(flagpoleList.size() - 1)[1]).getHigh()) {
+						flagpoleList.get(flagpoleList.size() - 1)[1] = j;
 					}
 				}
-
-				highestSwingHigh = currentHigh;
-				highestHighIndex = i;
 			}
 		}
 
-		if (highestHighIndex == -1 || highestHighIndex < minFlagBars || highestHighIndex > maxFlagBars) {
-			return false;
-		}
+		// Step 3: Validate bull flags for each flagpole
+		double currentPrice = stockDataList.get(0).getClose(); // Use oldest bar's close price
+		for (int i = 0; i < flagpoleList.size(); i++) {
+			int swingHighIndex = flagpoleList.get(i)[1];
+			int swingLowIndex = flagpoleList.get(i)[0];
 
-		highIndex = highestHighIndex;
-		flagpoleHigh = highestSwingHigh;
-		int flagBarCount = highIndex;
+			if (swingHighIndex < minimumSwingHighIndex) {
+				continue;
+			}
 
-		double flagMaxHigh = flagpoleHigh;
-		double flagMinLow = Double.MAX_VALUE;
-		for (int i = highIndex - 1; i >= 0; i--) {
-			flagMaxHigh = Math.max(flagMaxHigh, stockDataList.get(i).getHigh());
-			flagMinLow = Math.min(flagMinLow, stockDataList.get(i).getLow());
-		}
-		double flagRange = (flagMaxHigh - flagMinLow) / flagMinLow * 100;
-		LocalDate flagStart = highIndex > 1 ? stockDataList.get(highIndex - 1).getDate() : null;
-		LocalDate flagEnd = stockDataList.get(0).getDate();
+			double flagPoleHighPrice = stockDataList.get(swingHighIndex).getHigh();
 
-		double flagpoleLow = Double.MAX_VALUE;
-		int lowIndex = -1;
-		LocalDate startDate = null;
-		LocalDate endDate = stockDataList.get(highIndex).getDate();
-		double flagpoleSize = 0.0;
+			// Skip if current price exceeds swing high, as consolidation should be at or
+			// below
+			if (currentPrice > flagPoleHighPrice) {
+				continue;
+			}
 
-		for (int i = highIndex + 1; i <= highIndex + maxFlagpoleBars && i < stockDataList.size(); i++) {
-			if ("L".equals(stockDataList.get(i).getSwingType())) {
-				double currentLow = stockDataList.get(i).getLow();
-				int barCount = i - highIndex;
-				double currentFlagpoleSize = (flagpoleHigh - currentLow) / currentLow * 100;
-
-				if (barCount >= minFlagpoleBars && barCount <= maxFlagpoleBars
-						&& currentFlagpoleSize > priceIncreaseThreshold && currentLow < flagpoleLow) {
-					lowIndex = i;
-					flagpoleLow = currentLow;
-					startDate = stockDataList.get(i).getDate();
-					flagpoleSize = currentFlagpoleSize;
+			boolean validClosing = true;
+			// Validate closing prices from swing high to oldest bar against lower
+			// consolidation threshold
+			for (int j = swingHighIndex; j >= 0; j--) {
+				if (stockDataList.get(j).getClose() < flagPoleHighPrice * consolidationLowerThreshold) {
+					validClosing = false;
+					break;
 				}
 			}
+			if (!validClosing)
+				continue;
+
+			// Validate closing prices before swing high against 50% level of flagpole range
+			double flagPoleLowPrice = stockDataList.get(swingLowIndex).getLow();
+			double fiftyPercentLevel = (flagPoleHighPrice + flagPoleLowPrice) / 2;
+			for (int j = swingHighIndex - 1; j >= 0; j--) {
+				if (stockDataList.get(j).getClose() < fiftyPercentLevel) {
+					validClosing = false;
+					break;
+				}
+			}
+			if (!validClosing)
+				continue;
+
+			// Check if current price is within consolidation range
+			if (currentPrice >= flagPoleHighPrice * consolidationLowerThreshold
+					&& currentPrice <= flagPoleHighPrice * consolidationUpperThreshold) {
+				// Create Pattern object with static metrics from StockDataInfo
+				Pattern pattern = Pattern.builder().patternName(patternType).stockData(stockDataList.get(0))
+						.head(sd.head_0).tail(sd.tail_0).body0(sd.body_0).build();
+
+				// Calculate metrics for rank string
+				double flagpoleSizePercent = ((flagPoleHighPrice - flagPoleLowPrice) / flagPoleLowPrice) * 100;
+				int flagpoleDays = swingLowIndex - swingHighIndex;
+				double flagSize = flagPoleHighPrice - currentPrice;
+				double flagSizePercent = (flagSize / flagPoleHighPrice) * 100;
+				double proximityPercent = ((currentPrice - flagPoleHighPrice) / flagPoleHighPrice) * 100;
+
+				// Format rank string with pattern details
+				String rankStr = String.format(
+						"Flagpole Low Date:%s Low price:%.2f Flagpole High Date:%s High price:%.2f "
+								+ "Flagpole Size:%.2f%% Flagpole Days:%d Flag Size:%.2f Flag Size:%.2f%% Proximity to Close:%.2f%%",
+						stockDataList.get(swingLowIndex).getDate().toString(), flagPoleLowPrice,
+						stockDataList.get(swingHighIndex).getDate().toString(), flagPoleHighPrice, flagpoleSizePercent,
+						flagpoleDays, flagSize, flagSizePercent, proximityPercent);
+				pattern.setRank(swingHighIndex * -1); // to trick the rank comparator to do ascending sort
+				pattern.setRankStr(rankStr);
+
+				// Store pattern in results map and return success
+				patternResults.computeIfAbsent(patternType, k -> new ArrayList<>()).add(pattern);
+				return true;
+			}
 		}
 
-		if (lowIndex == -1) {
-			return false;
-		}
-
-		if (startDate == null || endDate == null || !startDate.isBefore(endDate)) {
-			return false;
-		}
-
-		int barCount = lowIndex - highIndex;
-		double flagpoleVolumeSum = 0.0;
-		for (int i = highIndex; i <= lowIndex; i++) {
-			flagpoleVolumeSum += stockDataList.get(i).getVolume();
-		}
-		double avgFlagpoleVolume = flagpoleVolumeSum / barCount;
-
-		double historicalVolumeSum = 0.0;
-		int historicalCount = 0;
-		for (int i = lowIndex + 1; i < lowIndex + 1 + historicalVolumePeriod && i < stockDataList.size(); i++) {
-			historicalVolumeSum += stockDataList.get(i).getVolume();
-			historicalCount++;
-		}
-		double volumeIncrease = (historicalCount > 0) ? avgFlagpoleVolume / (historicalVolumeSum / historicalCount)
-				: 0.0;
-
-		Pattern pattern = Pattern.builder().patternName(type).stockData(stockDataList.get(0)).head(sd.head_0)
-				.tail(sd.tail_0).body0(sd.body_0).country(config.country).build();
-		String rankStr = " FlagpoleLow:" + String.format("%.2f", flagpoleLow) + " FlagpoleHigh:"
-				+ String.format("%.2f", flagpoleHigh) + " PercentageIncrease:" + String.format("%.2f%%", flagpoleSize)
-				+ " StartDate:" + (startDate != null ? startDate.toString() : "N/A") + " EndDate:"
-				+ (endDate != null ? endDate.toString() : "N/A") + " VolumeIncrease:"
-				+ String.format("%.2f", volumeIncrease) + " LatestClose:" + String.format("%.2f", latestClose)
-				+ " FlagRange:" + String.format("%.2f%%", flagRange) + " FlagDuration:" + flagBarCount + " FlagStart:"
-				+ (flagStart != null ? flagStart.toString() : "N/A") + " FlagEnd:"
-				+ (flagEnd != null ? flagEnd.toString() : "N/A");
-		pattern.setRankStr(rankStr);
-		pattern.setRank(calculateADR(stockDataList, 20));
-		patternResults.computeIfAbsent(type, k -> new ArrayList<>()).add(pattern);
-		return true;
+		return false;
 	}
 
 	private boolean findAscendingTriangleStocks(String symbol, List<StockData> stockDataList) {
@@ -1846,36 +1896,128 @@ public class DataInjestionServiceNSEImpl {
 		return percentageMovement >= movementThreshold && volume >= volumeThreshold;
 	}
 
-	private void markSwingHighsAndLows(List<StockData> stockDataList) {
-		if (stockDataList == null || stockDataList.size() < 5) {
-			return; // Need at least 5 bars for ±2-bar window
+	private void markSwingHighsAndLows(String symbol, List<StockData> stockDataList) {
+		if (stockDataList.size() < 3) {
+			// Cannot mark swings if there are less than 3 data points
+			return;
 		}
 
-		int window = 2; // Check 2 bars before and after
-
-		for (int i = 0; i < stockDataList.size(); i++) {
+		for (int i = 1; i < stockDataList.size() - 1; i++) {
 			StockData current = stockDataList.get(i);
-			if (current.getHigh() <= 0 || current.getLow() <= 0) {
+			StockData prev = stockDataList.get(i - 1);
+			StockData next = stockDataList.get(i + 1);
+
+			if (current.getHigh() > prev.getHigh() && current.getHigh() > next.getHigh()) {
+				// Current price is higher than the previous and next prices, marking as swing
+				// high
+				current.setSwingType("H");
+			} else if (current.getLow() < prev.getLow() && current.getLow() < next.getLow()) {
+				// Current price is lower than the previous and next prices, marking as swing
+				// low
+				current.setSwingType("L");
+			} else {
+				// Not a swing high or swing low
 				current.setSwingType("");
-				continue;
 			}
 
-			boolean isSwingHigh = true;
-			boolean isSwingLow = true;
-
-			// Compare with bars in ±2 window
-			for (int j = Math.max(0, i - window); j <= Math.min(stockDataList.size() - 1, i + window); j++) {
-				if (j == i)
-					continue;
-				StockData other = stockDataList.get(j);
-				if (other.getHigh() >= current.getHigh())
-					isSwingHigh = false;
-				if (other.getLow() <= current.getLow())
-					isSwingLow = false;
+			boolean isPurpleDot = isPurpleCandle(current);
+			current.setPurpleDotType("");
+			if (isPurpleDot && current.getClose() > current.getOpen()) {
+				current.setPurpleDotType("GP");
+			} else if (isPurpleDot && current.getClose() > current.getOpen()) {
+				current.setPurpleDotType("RP");
 			}
-
-			current.setSwingType(isSwingHigh ? "H" : isSwingLow ? "L" : "");
 		}
+	}
+
+	/**
+	 * Extracts and refines a list of significant Swing Highs from the stock data
+	 * that are suitable for forming descending trendlines. Assumes
+	 * `markSwingHighsAndLows` has already been called on the `stockDataList`. The
+	 * returned list will be in reverse chronological order (latest swing high
+	 * first).
+	 *
+	 * @param stockDataList The list of StockData with swing types marked ('H' or
+	 *                      'L').
+	 * @return A list of `SwingPoint` objects representing the refined Swing Highs.
+	 */
+	private List<SwingPoint> getRefinedDescendingSwingHighs(List<StockData> stockDataList) {
+		List<SwingPoint> rawSwingHighs = new ArrayList<>();
+		int totalBars = stockDataList.size();
+
+		// 1. Extract all raw 'H' (Swing High) points
+		// Iterate from the latest data (index 0) to the oldest.
+		for (int i = 0; i < stockDataList.size(); i++) {
+			StockData data = stockDataList.get(i);
+			if ("H".equals(data.getSwingType())) {
+				rawSwingHighs.add(new SwingPoint(data.getDate(), data.getHigh(), "H", i, totalBars));
+			}
+		}
+
+		// 2. Refine the raw swing highs to get a cleaner, descending sequence.
+		// This step aims to pick the most dominant high in a cluster and ensure
+		// a logical flow for potential trendlines.
+		List<SwingPoint> refinedSwingHighs = new ArrayList<>();
+
+		if (rawSwingHighs.isEmpty()) {
+			return refinedSwingHighs; // No swing highs found.
+		}
+
+		// Always add the most recent swing high as the starting point for refinement.
+		// This is H1 for a potential descending trendline.
+		refinedSwingHighs.add(rawSwingHighs.get(0));
+
+		for (int i = 1; i < rawSwingHighs.size(); i++) {
+			SwingPoint currentRawH = rawSwingHighs.get(i); // This is an older 'H'
+			SwingPoint lastRefinedH = refinedSwingHighs.get(refinedSwingHighs.size() - 1); // The most recently added
+																							// 'H' to our refined list
+
+			// Rule for adding:
+			// We are looking for a 'currentRawH' that is chronologically older (higher
+			// index),
+			// and ideally lower in price than 'lastRefinedH' to form a descending sequence.
+			// We also want to avoid picking 'H's that are too close in time or are part of
+			// the same price cluster.
+
+			// Scenario A: Current raw high is significantly lower than the last refined
+			// high
+			// This is a clear candidate for the next point in a descending trendline.
+			// We add a minimum bar separation (e.g., at least 3 bars) to ensure
+			// distinctness.
+			if (currentRawH.getPrice() < lastRefinedH.getPrice()
+					&& (currentRawH.getOriginalIndex() - lastRefinedH.getOriginalIndex()) >= 3) { // Ensure sufficient
+																									// time separation
+				refinedSwingHighs.add(currentRawH);
+			}
+			// Scenario B: Current raw high is higher than the last refined high, but
+			// chronologically older.
+			// This means 'lastRefinedH' might not have been the true peak in that earlier
+			// period.
+			// If the current raw high is higher and also sufficiently separated, we could
+			// replace 'lastRefinedH'.
+			// However, for *descending* trendlines, we are interested in progressively
+			// *lower* highs.
+			// So, if we encounter a chronologically older but higher 'H', it indicates the
+			// 'lastRefinedH' was a local
+			// high in an *uptrend* or sideways move, and not suitable for continuing a
+			// *descending* line from 'lastRefinedH'.
+			// For simplicity for descending trendlines, we mainly care about Scenario A.
+			// The previous iteration of the outer loop would have picked the actual higher
+			// swing if it was a peak.
+			// So if currentRawH.getPrice() > lastRefinedH.getPrice(), we generally ignore
+			// it for descending sequence building.
+
+			// If currentRawH is equal to lastRefinedH, we ignore it as well to prevent
+			// duplicates.
+		}
+
+		// At this point, 'refinedSwingHighs' contains swing highs in reverse
+		// chronological order,
+		// where each successive high (chronologically older) is lower than the previous
+		// one,
+		// and they are sufficiently separated.
+
+		return refinedSwingHighs;
 	}
 
 	private void watchList() {
@@ -1986,7 +2128,7 @@ public class DataInjestionServiceNSEImpl {
 				String symbol = pattern.getStockData() != null ? pattern.getStockData().getSymbol() : "N/A";
 				String country = pattern.getCountry() != null ? pattern.getCountry() : config.country;
 				String patternDate = pattern.getDate() != null ? pattern.getDate().toString() : "N/A";
-				String rank = pattern.getRank() > 0 ? Double.toString(pattern.getRank()) : "";
+				String rank = Double.toString(pattern.getRank());
 
 				boolean purpleDot = false;
 
@@ -2383,6 +2525,163 @@ public class DataInjestionServiceNSEImpl {
 			System.out.println("Sector: " + result.getSector() + ", Average Percentage Change: "
 					+ result.getAveragePercentageChange());
 		}
+	}
+
+	/**
+	 * Generates potential descending trendlines from a list of refined swing highs.
+	 * A descending trendline connects two swing highs where the chronologically
+	 * older high is higher in price than the chronologically newer high.
+	 *
+	 * @param refinedSwingHighs    A list of `SwingPoint` objects (type "H"), in
+	 *                             reverse chronological order (latest H first), as
+	 *                             returned by `getRefinedDescendingSwingHighs`.
+	 * @param minSlopeAngleDegrees (Optional) Minimum downward angle of the
+	 *                             trendline in degrees. For example, if -5 degrees,
+	 *                             the slope must be steeper (more negative) than
+	 *                             tan(-5 deg).
+	 * @param minPriceDropPercent  (Optional) Minimum percentage drop required
+	 *                             between the two swing highs to consider forming a
+	 *                             valid descending trendline. E.g., 0.5 for 0.5%.
+	 * @return A list of potential `Trendline` objects.
+	 */
+	private List<Trendline> generateDescendingTrendlines(List<SwingPoint> refinedSwingHighs,
+			double minSlopeAngleDegrees, double minPriceDropPercent) {
+
+		List<Trendline> descendingTrendlines = new ArrayList<>();
+
+		// We need at least two swing highs to form a line.
+		if (refinedSwingHighs.size() < 2) {
+			return descendingTrendlines;
+		}
+
+		// Create a chronological copy of the swing highs for easier iteration (oldest
+		// first).
+		List<SwingPoint> chronologicalSwingHighs = new ArrayList<>(refinedSwingHighs);
+		Collections.reverse(chronologicalSwingHighs); // Now, oldest H is at index 0, newest is at size-1.
+
+		// Calculate the minimum allowed slope value based on the angle.
+		// For a descending line, slope should be negative.
+		// E.g., if minSlopeAngleDegrees is -5, slope must be <= tan(-5 deg) (e.g.,
+		// -0.087).
+		// A slope of -0.1 is steeper (more negative) than -0.087, so it satisfies.
+		double minSlopeValue = Math.tan(Math.toRadians(minSlopeAngleDegrees));
+
+		// Iterate through all possible pairs of swing highs to form lines
+		// Point1 is always chronologically older than Point2 (i < j).
+		for (int i = 0; i < chronologicalSwingHighs.size(); i++) {
+			SwingPoint point1 = chronologicalSwingHighs.get(i); // Potential start point (older, left)
+
+			// Iterate through all subsequent points for the end point
+			for (int j = i + 1; j < chronologicalSwingHighs.size(); j++) {
+				SwingPoint point2 = chronologicalSwingHighs.get(j); // Potential end point (newer, right)
+
+				// Conditions for a valid DESCENDING trendline between point1 and point2:
+				// 1. Point2 must be lower in price than Point1.
+				// 2. There must be a minimum percentage drop between Point1 and Point2 (for
+				// significance).
+				double priceDropPercentage = ((point1.getPrice() - point2.getPrice()) / point1.getPrice()) * 100;
+
+				if (point2.getPrice() < point1.getPrice() && priceDropPercentage >= minPriceDropPercent) {
+					Trendline potentialTrendline = new Trendline(point1, point2, "Descending");
+
+					// 3. The slope of the line must meet the minimum downward angle requirement.
+					// (Slope should be negative and less than or equal to minSlopeValue, which is
+					// also negative).
+					if (potentialTrendline.getSlope() <= minSlopeValue) {
+						descendingTrendlines.add(potentialTrendline);
+					}
+				}
+			}
+		}
+		return descendingTrendlines;
+	}
+
+	/**
+	 * Validates potential descending trendlines by checking for additional
+	 * "touches" from candles. For a descending (resistance) trendline, a touch is
+	 * considered when a candle's high is at or very near the line, and its closing
+	 * price remains below or very near the line, suggesting rejection.
+	 *
+	 * @param potentialTrendlines   The list of trendlines generated in Step 2.
+	 * @param stockDataList         The full list of StockData for accessing all
+	 *                              candle highs, lows, and closes. (Assumed to be
+	 *                              in reverse chronological order: index 0 is
+	 *                              newest).
+	 * @param touchTolerancePercent The percentage deviation allowed for a candle's
+	 *                              high to be considered a "touch". E.g., 0.2 for
+	 *                              0.2%.
+	 * @param minValidationTouches  The minimum number of *additional* touches
+	 *                              (beyond the initial two defining points)
+	 *                              required to consider a trendline validated.
+	 * @return A filtered list of validated `Trendline` objects, with their touch
+	 *         counts updated.
+	 */
+	private List<Trendline> validateDescendingTrendlines(List<Trendline> potentialTrendlines,
+			List<StockData> stockDataList, double touchTolerancePercent, int minValidationTouches) {
+
+		List<Trendline> validatedTrendlines = new ArrayList<>();
+		int totalBars = stockDataList.size(); // Total number of bars for chronologicalX calculation
+
+		for (Trendline trendline : potentialTrendlines) {
+			int currentAdditionalTouches = 0;
+
+			// Iterate through all candles from the point chronologically just *after* the
+			// trendline's
+			// startPoint (i.e., between startPoint.originalIndex and 0) up to the current
+			// bar (index 0).
+			// This covers all bars that could potentially validate the line after its
+			// definition.
+			// Note: stockDataList is in reverse chronological order (index 0 is newest).
+			// startPoint.getOriginalIndex() is a higher index (older bar).
+			// We want to check candles from (startPoint.getOriginalIndex() - 1) down to 0.
+
+			for (int i = trendline.getStartPoint().getOriginalIndex() - 1; i >= 0; i--) {
+				StockData currentCandle = stockDataList.get(i);
+				int currentCandleChronologicalX = totalBars - 1 - i; // Calculate chronological X for this candle
+
+				// IMPORTANT: Exclude the two defining points of the trendline from being
+				// counted as *additional* touches.
+				// This is crucial, as they already define the line.
+				// Using equals on SwingPoint might not work well if they are different
+				// instances.
+				// Comparing dates or original indices is more reliable.
+				if (i == trendline.getStartPoint().getOriginalIndex()
+						|| i == trendline.getEndPoint().getOriginalIndex()) {
+					continue;
+				}
+
+				// Calculate the expected price of the trendline at this candle's chronological
+				// X
+				double linePriceAtX = trendline.getPriceAtChronologicalX(currentCandleChronologicalX);
+				double maxDeviation = linePriceAtX * (touchTolerancePercent / 100.0);
+
+				// --- Touch criteria for a DESCENDING (RESISTANCE) Trendline ---
+				// A "touch" suggests that price approached the line and was rejected from
+				// above.
+				// 1. The candle's high must be close to the trendline price (within tolerance).
+				// 2. The candle's close should be below the trendline price (or very close),
+				// indicating it couldn't break and sustain above the resistance.
+				boolean highIsCloseToLine = Math.abs(currentCandle.getHigh() - linePriceAtX) <= maxDeviation;
+				boolean closeIsBelowOrNearLine = currentCandle.getClose() <= linePriceAtX + (maxDeviation / 2.0); // Allow
+																													// slight
+																													// tolerance
+																													// for
+																													// close
+																													// too
+
+				if (highIsCloseToLine && closeIsBelowOrNearLine) {
+					currentAdditionalTouches++;
+				}
+			}
+
+			// If the trendline meets the minimum number of *additional* touches, add it to
+			// the validated list.
+			if (currentAdditionalTouches >= minValidationTouches) {
+				trendline.setValidationTouchCount(currentAdditionalTouches);
+				validatedTrendlines.add(trendline);
+			}
+		}
+		return validatedTrendlines;
 	}
 
 }
