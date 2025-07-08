@@ -280,7 +280,7 @@ public class DataInjestionServiceNSEImpl {
 	Map<String, List<Pattern>> patternResults = new ConcurrentHashMap<>();
 	Set<String> patternResultsSet = new HashSet<>();
 	String outputFilePath = "C:\\Users\\USER\\OneDrive - RamGenix\\ASX\\newhtml\\";
-	private String stockchartsurl = "p=D&yr=0&mn=6&dy=0&i=t4382950370c&r=1751944099189";
+	private String stockchartsurl = "p=D&yr=0&mn=6&dy=0&i=t2724839902c&r=1751973752017";
 	Set<String> inputWatchList = new HashSet<>();
 	String watchlist = "";
 
@@ -312,6 +312,8 @@ public class DataInjestionServiceNSEImpl {
 	private String processLatestData(Market market) {
 		stockDataMap.clear();
 		stockDataMap = prepareDataForProcessing(market);
+
+		performSectorAnalysis(stockDataMap);
 
 		MarketConfig config = marketConfigs.get(market);
 		stockDataMap.forEach((symbol, stockDataList) -> {
@@ -361,7 +363,7 @@ public class DataInjestionServiceNSEImpl {
 		});
 
 		if (StringUtils.isEmpty(watchlist)) {
-			watchList();
+			watchList(market);
 		}
 
 		getRestingStocksAfterBurst(market);
@@ -446,6 +448,9 @@ public class DataInjestionServiceNSEImpl {
 		if (patterns != null && !patterns.isEmpty()) {
 			// Sort and save full pattern file
 			patterns.sort(new RankComparator());
+			if (patterns.size() > 100) {
+				patterns.subList(100, patterns.size()).clear();
+			}
 			savePatternsToFile(market, dates.get(0), patterns, fileName, false, false);
 
 			// Generate incremental patterns
@@ -816,17 +821,21 @@ public class DataInjestionServiceNSEImpl {
 		if (config == null)
 			return false;
 
-		if (sd.tail_0 >= (2 * sd.body_0) && sd.low_0 <= sd.low_1 && (sd.tail_0 / sd.head_0) > 2) {
+		if (sd.tail_0 >= (2 * sd.body_0) && sd.low_0 <= sd.low_1 && (sd.head_0 == 0 || (sd.tail_0 / sd.head_0) > 2)) {
+
 			Pattern pattern = Pattern.builder().bbValues(bbValues).patternName(type).stockData(stockDataList.get(0))
 					.head(sd.head_0).tail(sd.tail_0).body0(sd.body_0).country(config.country).build();
 
-			pattern.setRank(calculateADR(stockDataList, 20));
+			double adr = calculateADR(stockDataList, 20);
+			pattern.setRank(adr);
+			pattern.setRankStr("ADR:" + adr);
 			patternResults.computeIfAbsent(type, k -> new ArrayList<>()).add(pattern);
 			hammerStrings.add(symbol);
 			savePattern(pattern, type, sd);
 			return true;
 		}
 		return false;
+
 	}
 
 	private boolean findNearSupportStocks(String symbol, List<StockData> stockDataList) {
@@ -1103,7 +1112,7 @@ public class DataInjestionServiceNSEImpl {
 		}
 
 		// Optional filter for testing specific stock, currently disabled
-		if (!symbol.equals("GEPIL")) {
+		if (!symbol.equals("UBER")) {
 			// return false;
 		}
 
@@ -1116,8 +1125,17 @@ public class DataInjestionServiceNSEImpl {
 		}
 
 		double adr = calculateADR(stockDataList, 20);
-		if (adr < 3.5) {
-			return false;
+
+		if (market == Market.US) {
+			if (adr > 3.5) {
+				// OK, skip further checks
+			} else if (adr <= 2.5 || sd.close_0 <= 50 || sd.volume_0 <= 500000) {
+				return false;
+			}
+		} else {
+			if (adr < 3.5) {
+				return false;
+			}
 		}
 
 		if (market == Market.US && (sd.close_0 < 20 || sd.close_0 > 1000)) {
@@ -1715,6 +1733,9 @@ public class DataInjestionServiceNSEImpl {
 		if (sd.close_0 > sd.open_0) {
 			Pattern pattern = Pattern.builder().patternName(type).stockData(stockDataList.get(0)).head(sd.head_0)
 					.tail(sd.tail_0).body0(sd.body_0).country(config.country).build();
+			pattern.setRank(sd.close_0 - sd.close_1);
+			double adr = calculateADR(stockDataList, 20);
+			pattern.setRankStr("ADR:" + adr);
 			patternResults.computeIfAbsent(type, k -> new ArrayList<>()).add(pattern);
 			return true;
 		}
@@ -2029,9 +2050,14 @@ public class DataInjestionServiceNSEImpl {
 		return refinedSwingHighs;
 	}
 
-	private void watchList() {
+	private void watchList(Market market) {
 		File folder = new File("C:\\Users\\USER\\OneDrive - RamGenix\\ASX\\");
-		File[] files = folder.listFiles((dir, name) -> name.matches(".*Watchlist-US-*.+\\.txt"));
+		File[] files = null;
+
+		if (market == Market.US)
+			files = folder.listFiles((dir, name) -> name.matches(".*Watchlist-US-*.+\\.txt"));
+		else if (market == Market.NSE)
+			files = folder.listFiles((dir, name) -> name.matches(".*Watchlist-*.+\\.txt"));
 
 		if (files == null) {
 			System.out.println("No Watchlist file found.");
@@ -2081,8 +2107,7 @@ public class DataInjestionServiceNSEImpl {
 			});
 			;
 			if (watchListResults != null) {
-				// savePatternsToFile(dates.get(0), watchListResults, patternName, false,
-				// false);
+				savePatternsToFile(market, dates.get(0), watchListResults, patternName, false, false);
 			}
 		}
 
