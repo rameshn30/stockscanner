@@ -55,17 +55,6 @@ public class DataInjestionServiceNSEImpl {
 	private static final int BREAKOUT_DAYS_WINDOW = 50;
 	private static final int SH_CANDIDATE_20_DAY_LOOKBACK = 20;
 
-	// Constants for bull flag detection parameters
-	private static final double BULL_FLAG_FLAGPOLE_BURST_THRESHOLD = 1.19; // Minimum price increase for swing high
-																			// (19%)
-	private static final double BULL_FLAG_CONSOLIDATION_LOWER_THRESHOLD = 0.90; // Lower boundary for consolidation
-																				// range (90% of swing high)
-	private static final double BULL_FLAG_CONSOLIDATION_UPPER_THRESHOLD = 1.10; // Upper boundary for consolidation
-																				// range (110% of swing high)
-	private static final int BULL_FLAG_FLAGPOLE_HIGH_MIN_DISTANCE_FROM_CURRENT = 4; // Minimum bars between flagpole and
-																					// current
-	// data
-
 	// Market enum
 	public enum Market {
 		NSE, US
@@ -269,6 +258,7 @@ public class DataInjestionServiceNSEImpl {
 		patternToFileNameMap.put("BreakoutBars", "ResistanceTurnedSupport");
 		patternToFileNameMap.put("BULL_FLAG", "BullFlag");
 		patternToFileNameMap.put("AscendingTriangle", "AscendingTriangle");
+		patternToFileNameMap.put("UpDay", "UpDay");
 
 		this.marketConfigs = new HashMap<>();
 		marketConfigs.put(Market.NSE,
@@ -290,7 +280,7 @@ public class DataInjestionServiceNSEImpl {
 	Map<String, List<Pattern>> patternResults = new ConcurrentHashMap<>();
 	Set<String> patternResultsSet = new HashSet<>();
 	String outputFilePath = "C:\\Users\\USER\\OneDrive - RamGenix\\ASX\\newhtml\\";
-	private String stockchartsurl = "p=D&yr=0&mn=6&dy=0&i=t0134415720c&r=1751859357029";
+	private String stockchartsurl = "p=D&yr=0&mn=6&dy=0&i=t4382950370c&r=1751944099189";
 	Set<String> inputWatchList = new HashSet<>();
 	String watchlist = "";
 
@@ -351,15 +341,17 @@ public class DataInjestionServiceNSEImpl {
 				bbValues = calculateBBAndMaValues(symbol, stockDataList, 0);
 
 				if (volumeCheck(stockDataList) && priceCheck(stockDataList) && symbolCheck(market, stockDataList)) {
+
 					findVolumeShockers(market, symbol, stockDataList);
 					findPurpleDotStocks(market, symbol, stockDataList);
 					findGapUpStocks(market, symbol, stockDataList);
 					findPowerUpCandleStocks(market, symbol, stockDataList);
+
 				}
 
 				boolean goldenStocksOnly = false;
 				{
-					if (findBullishPatternsAdvanced(symbol, stockDataList, goldenStocksOnly)) {
+					if (findBullishPatternsAdvanced(market, symbol, stockDataList, goldenStocksOnly)) {
 
 					}
 					checkBearishPatterns(symbol, stockDataList);
@@ -369,10 +361,10 @@ public class DataInjestionServiceNSEImpl {
 		});
 
 		if (StringUtils.isEmpty(watchlist)) {
-			// watchList();
+			watchList();
 		}
 
-		getRestingStocksAfterBurst();
+		getRestingStocksAfterBurst(market);
 
 		// Process all pattern types
 		patternToFileNameMap.forEach((patternName, fileName) -> saveSortedPatterns(market, patternName, fileName));
@@ -380,28 +372,53 @@ public class DataInjestionServiceNSEImpl {
 		return null;
 	}
 
-	private boolean findBullishPatternsAdvanced(String symbol, List<StockData> stockDataList,
+	private boolean findBullishPatternsAdvanced(Market market, String symbol, List<StockData> stockDataList,
 			boolean superStrongStocksOnly) {
 
-		/*
-		 * private static final int BULL_FLAG_MINIMUM_BARS = 5; // Minimum number of
-		 * bars required for valid input private static final double
-		 * BULL_FLAG_FLAGPOLE_THRESHOLD = 1.19; // Minimum price increase for swing high
-		 * (19%) private static final double BULL_FLAG_CONSOLIDATION_LOWER_THRESHOLD =
-		 * 0.90; // Lower boundary for consolidation // range (90% of swing high)
-		 * private static final double BULL_FLAG_CONSOLIDATION_UPPER_THRESHOLD = 1.10;
-		 * // Upper boundary for consolidation // range (110% of swing high) private
-		 * static final int BULL_FLAG_MINIMUM_SWING_HIGH_INDEX = 6; // Minimum swing
-		 * high index to ensure sufficient
-		 * 
-		 */
+		// findNearSupportStocks(symbol, stockDataList);
+		findBreakoutRetracementStocks(symbol, stockDataList);
 
-//		findNearSupportStocks(symbol, stockDataList);
-		// findBreakoutRetracementStocks(symbol, stockDataList);
-		findBullFlagStocksAdvanced(symbol, stockDataList, BULL_FLAG_FLAGPOLE_BURST_THRESHOLD,
+		// Constants for bull flag detection parameters
+		double BULL_FLAG_FLAGPOLE_BURST_THRESHOLD = 1.19; // Minimum price increase for swing high // (19%)
+		double BULL_FLAG_CONSOLIDATION_LOWER_THRESHOLD = 0.80; // Lower boundary for consolidation range (90% of swing
+																// // high)
+		double BULL_FLAG_CONSOLIDATION_UPPER_THRESHOLD = 1.10; // Upper boundary for consolidation range (110% of swing
+																// // high)
+		int BULL_FLAG_FLAGPOLE_HIGH_MIN_DISTANCE_FROM_CURRENT = 4; // Minimum bars between flagpole and current data
+
+		int minimumFlagPoleBars = 5;
+		int maximumFlagPoleBars = 30;
+
+		if (market == Market.US) {
+			BULL_FLAG_FLAGPOLE_BURST_THRESHOLD = 1.10;
+			// (10%)
+			BULL_FLAG_CONSOLIDATION_LOWER_THRESHOLD = 0.90;
+			// range (90% of swing high)
+			BULL_FLAG_CONSOLIDATION_UPPER_THRESHOLD = 1.10;
+			// range (110% of swing high)
+			BULL_FLAG_FLAGPOLE_HIGH_MIN_DISTANCE_FROM_CURRENT = 4;
+			minimumFlagPoleBars = 3;
+			maximumFlagPoleBars = 10;
+
+		}
+
+		if (market == Market.NSE) {
+			BULL_FLAG_FLAGPOLE_BURST_THRESHOLD = 1.08;
+			// (10%)
+			BULL_FLAG_CONSOLIDATION_LOWER_THRESHOLD = 0.90;
+			// range (90% of swing high)
+			BULL_FLAG_CONSOLIDATION_UPPER_THRESHOLD = 1.10;
+			// range (110% of swing high)
+			BULL_FLAG_FLAGPOLE_HIGH_MIN_DISTANCE_FROM_CURRENT = 2;
+			minimumFlagPoleBars = 3;
+			maximumFlagPoleBars = 10;
+
+		}
+
+		findBullFlagStocksAdvanced(market, symbol, stockDataList, BULL_FLAG_FLAGPOLE_BURST_THRESHOLD,
 				BULL_FLAG_CONSOLIDATION_LOWER_THRESHOLD, BULL_FLAG_CONSOLIDATION_UPPER_THRESHOLD,
-				BULL_FLAG_FLAGPOLE_HIGH_MIN_DISTANCE_FROM_CURRENT, "BULL_FLAG");
-		// findAscendingTriangleStocks(symbol, stockDataList);
+				BULL_FLAG_FLAGPOLE_HIGH_MIN_DISTANCE_FROM_CURRENT, minimumFlagPoleBars, maximumFlagPoleBars,
+				"BULL_FLAG");
 
 		if (!volumeCheck(stockDataList) || !priceCheck(stockDataList))
 			return false;
@@ -435,7 +452,8 @@ public class DataInjestionServiceNSEImpl {
 			List<Pattern> incrementalPatterns = getIncrementalPatterns(market, patternName, patterns);
 			if (!incrementalPatterns.isEmpty()) {
 				incrementalPatterns.sort(new RankComparator());
-				savePatternsToFile(market, dates.get(0), incrementalPatterns, "incremental-" + fileName, false, false);
+				// savePatternsToFile(market, dates.get(0), incrementalPatterns, "incremental-"
+				// + fileName, false, false);
 			}
 		}
 	}
@@ -999,9 +1017,6 @@ public class DataInjestionServiceNSEImpl {
 												* (1 + RETRACEMENT_TOLERANCE_PERCENT / 100);
 
 										if (currentClose >= lowerBound && currentClose <= upperBound) {
-											System.out
-													.println(shCandidate.getSymbol() + " high:" + shCandidate.getHigh()
-															+ " date:" + shCandidate.getDate().toString());
 											StockDataInfo sd = new StockDataInfo(stockDataList);
 											Pattern pattern = Pattern.builder().patternName(patternType)
 													.stockData(stockDataList.get(0)).head(sd.head_0).tail(sd.tail_0)
@@ -1079,25 +1094,43 @@ public class DataInjestionServiceNSEImpl {
 	}
 
 	// Detects bull flag patterns for a given stock symbol and stock data list
-	private boolean findBullFlagStocksAdvanced(String symbol, List<StockData> stockDataList, double flagpoleThreshold,
-			double consolidationLowerThreshold, double consolidationUpperThreshold, int minimumSwingHighIndex,
-			String patternType) {
+	private boolean findBullFlagStocksAdvanced(Market market, String symbol, List<StockData> stockDataList,
+			double flagpoleThreshold, double consolidationLowerThreshold, double consolidationUpperThreshold,
+			int minimumSwingHighIndex, int minimumFlagPoleBars, int maximumFlagPoleBars, String patternType) {
 		// Validate input data: check for null, empty list, price, and volume conditions
-		if (stockDataList == null || stockDataList.isEmpty() || !priceCheck(stockDataList)
-				|| !volumeCheck(stockDataList)) {
+		if (stockDataList == null || stockDataList.isEmpty() || !volumeCheck(stockDataList)) {
 			return false;
 		}
 
-		// Optional filter for testing specific stock , currently disabled
-		if (!symbol.equals("TSLA")) {
+		// Optional filter for testing specific stock, currently disabled
+		if (!symbol.equals("GEPIL")) {
 			// return false;
+		}
+
+		// Create StockDataInfo to extract static metrics for the entire dataset
+		StockDataInfo sd = new StockDataInfo(stockDataList);
+
+		BBValues bb = calculateBBAndMaValues(symbol, stockDataList, 0);
+		if (!(bb != null && bb.getMa_20() > bb.getMa_50())) {
+			return false;
+		}
+
+		double adr = calculateADR(stockDataList, 20);
+		if (adr < 3.5) {
+			return false;
+		}
+
+		if (market == Market.US && (sd.close_0 < 20 || sd.close_0 > 1000)) {
+			return false;
+		}
+
+		List<Pattern> patternsFromDB = getPatternsFromDB(market);
+		if (patternsFromDB == null || patternsFromDB.isEmpty()) {
+			return false;
 		}
 
 		// Initialize variables for flagpole detection and pattern storage
 		List<int[]> flagpoleList = new ArrayList<>();
-
-		// Create StockDataInfo to extract static metrics for the entire dataset
-		StockDataInfo sd = new StockDataInfo(stockDataList);
 
 		// Step 1: Identify all swing lows in the dataset
 		List<Integer> swingLowIndices = new ArrayList<>();
@@ -1108,13 +1141,14 @@ public class DataInjestionServiceNSEImpl {
 		}
 
 		// Step 2: For each swing low, find swing highs with sufficient price increase
+		// and valid duration
 		for (int lowIndex : swingLowIndices) {
 			int prevLowIndex = -1; // Track previous swing low to ensure one flagpole per low
 			double swingLowPrice = stockDataList.get(lowIndex).getLow();
-			// Search backward for swing highs before the swing low
-			for (int j = lowIndex - 1; j > 0; j--) {
+			// Search backward for swing highs before the swing low (newer indices)
+			for (int j = lowIndex - 1; j >= 0; j--) {
 				// Invalidate swing low if any prior bar's close is below the swing low's close
-				if (stockDataList.get(j).getClose() < stockDataList.get(lowIndex).getClose()) {
+				if (stockDataList.get(j).getClose() < stockDataList.get(lowIndex).getLow()) {
 					removeSwingLowFromFlagPoleList(flagpoleList, lowIndex);
 					break; // Stop processing this swing low
 				}
@@ -1122,6 +1156,11 @@ public class DataInjestionServiceNSEImpl {
 				// low
 				if ("H".equals(stockDataList.get(j).getSwingType())
 						&& stockDataList.get(j).getHigh() >= swingLowPrice * flagpoleThreshold) {
+					// Ensure flagpole duration is within minimum and maximum bounds
+					int flagpoleDuration = lowIndex - j;
+					if (flagpoleDuration < minimumFlagPoleBars || flagpoleDuration > maximumFlagPoleBars) {
+						continue; // Skip if flagpole duration is invalid
+					}
 					// Add new flagpole for this swing low if none exists
 					if (flagpoleList.isEmpty() || prevLowIndex == -1 || prevLowIndex != lowIndex) {
 						flagpoleList.add(new int[] { lowIndex, j });
@@ -1137,7 +1176,7 @@ public class DataInjestionServiceNSEImpl {
 		}
 
 		// Step 3: Validate bull flags for each flagpole
-		double currentPrice = stockDataList.get(0).getClose(); // Use oldest bar's close price
+		double currentPrice = stockDataList.get(0).getClose(); // Use latest bar's close price
 		for (int i = 0; i < flagpoleList.size(); i++) {
 			int swingHighIndex = flagpoleList.get(i)[1];
 			int swingLowIndex = flagpoleList.get(i)[0];
@@ -1155,9 +1194,9 @@ public class DataInjestionServiceNSEImpl {
 			}
 
 			boolean validClosing = true;
-			// Validate closing prices from swing high to oldest bar against lower
+			// Validate closing prices from swing high to latest bar against lower
 			// consolidation threshold
-			for (int j = swingHighIndex; j >= 0; j--) {
+			for (int j = swingHighIndex - 1; j >= 0; j--) {
 				if (stockDataList.get(j).getClose() < flagPoleHighPrice * consolidationLowerThreshold) {
 					validClosing = false;
 					break;
@@ -1195,11 +1234,11 @@ public class DataInjestionServiceNSEImpl {
 				// Format rank string with pattern details
 				String rankStr = String.format(
 						"Flagpole Low Date:%s Low price:%.2f Flagpole High Date:%s High price:%.2f "
-								+ "Flagpole Size:%.2f%% Flagpole Days:%d Flag Size:%.2f Flag Size:%.2f%% Proximity to Close:%.2f%%",
+								+ "Flagpole Size:%.2f%% Flagpole Days:%d Flag Size:%.2f Flag Size:%.2f%% Proximity to Close:%.2f%% ADR:%.2f",
 						stockDataList.get(swingLowIndex).getDate().toString(), flagPoleLowPrice,
 						stockDataList.get(swingHighIndex).getDate().toString(), flagPoleHighPrice, flagpoleSizePercent,
-						flagpoleDays, flagSize, flagSizePercent, proximityPercent);
-				pattern.setRank(swingHighIndex * -1); // to trick the rank comparator to do ascending sort
+						flagpoleDays, flagSize, flagSizePercent, proximityPercent, adr);
+				pattern.setRank(swingHighIndex * -1); // Prioritize newer highs for ascending sort
 				pattern.setRankStr(rankStr);
 
 				// Store pattern in results map and return success
@@ -1211,222 +1250,174 @@ public class DataInjestionServiceNSEImpl {
 		return false;
 	}
 
-	private boolean findAscendingTriangleStocks(String symbol, List<StockData> stockDataList) {
+	private boolean findAscendingTriangleStocks(String symbol, List<StockData> stockDataList, int minimumSwingPoints,
+			double resistanceRange, double minimumLowIncrease, int minimumTriangleBars, int maximumTriangleBars,
+			String patternType) {
+		// Validate input data: check for null, empty list, price, and volume conditions
 		if (stockDataList == null || stockDataList.isEmpty() || !priceCheck(stockDataList)
 				|| !volumeCheck(stockDataList)) {
 			return false;
 		}
-		MarketConfig config = marketConfigs.get(Market.NSE); // Default to NSE, adjust if needed
-		if (config == null)
-			return false;
 
-		if (!symbol.equals("DALBHARAT")) {
+		// Optional filter for testing specific stock (TSLA), currently disabled
+		if (!symbol.equals("TSLA")) {
 			// return false;
 		}
 
-		String type = "AscendingTriangle";
-		double resistanceTolerance = 1.5;
-		int maxTriangleBars = 50;
-		int minTouches = 2;
-		int minBarsBetweenHighs = 5;
-		double maxHighsPercentage = 0.5;
-		double maxTriangleRange = 15.0;
-		double maxLastTwoLowsPercentage = 5.0;
-		int minBarsBetweenLows = 5;
-		double idealSlope = 1.0;
-		double maxSlopeDeviation = 5.0;
-		double minRankScore = 50.0;
+		// Initialize variables for triangle detection and pattern storage
+		List<int[]> trianglePoints = new ArrayList<>();
+
+		// Create StockDataInfo to extract static metrics for the entire dataset
 		StockDataInfo sd = new StockDataInfo(stockDataList);
 
-		double latestClose = stockDataList.get(0).getClose();
-		if (latestClose == 0.0) {
-			return false;
+		// Step 1: Identify all swing lows and highs in the dataset
+		List<Integer> swingLowIndices = new ArrayList<>();
+		List<Integer> swingHighIndices = new ArrayList<>();
+		for (int i = 0; i < stockDataList.size(); i++) {
+			if ("L".equals(stockDataList.get(i).getSwingType())) {
+				swingLowIndices.add(i);
+			} else if ("H".equals(stockDataList.get(i).getSwingType())) {
+				swingHighIndices.add(i);
+			}
 		}
 
-		double resistanceLevel = 0.0;
-		int highIndex = -1;
-		List<Integer> swingHighIndices = new ArrayList<>();
-		double highestHigh = 0.0;
+		// Step 2: Validate ascending triangle by finding pairs of swing lows where the
+		// newer low
+		// (lower index, later in time) has a higher price than the older low (higher
+		// index, earlier in time)
+		for (int i = 0; i < swingLowIndices.size() - 1; i++) {
+			int lowIndex1 = swingLowIndices.get(i); // Newer swing low (later in time)
+			double lowPrice1 = stockDataList.get(lowIndex1).getLow();
+			for (int j = i + 1; j < swingLowIndices.size(); j++) {
+				int lowIndex2 = swingLowIndices.get(j); // Older swing low (earlier in time)
+				double lowPrice2 = stockDataList.get(lowIndex2).getLow();
 
-		for (int i = 1; i <= maxTriangleBars && i < stockDataList.size(); i++) {
-			if ("H".equals(stockDataList.get(i).getSwingType())) {
-				double currentHigh = stockDataList.get(i).getHigh();
-				if (currentHigh > highestHigh) {
-					highestHigh = currentHigh;
-					swingHighIndices.clear();
-					swingHighIndices.add(i);
-				} else if (Math.abs(currentHigh - highestHigh) / highestHigh * 100 <= resistanceTolerance) {
-					if (swingHighIndices.isEmpty()
-							|| (i - swingHighIndices.get(swingHighIndices.size() - 1) >= minBarsBetweenHighs)) {
-						swingHighIndices.add(i);
+				// Ensure the newer swing low (lower index) has a higher price than the older
+				// swing low
+				// by at least the specified increase to form an ascending support line
+				if (lowPrice1 <= lowPrice2 * (1 + minimumLowIncrease)) {
+					continue; // Skip if the newer low is not sufficiently higher
+				}
+
+				// Ensure triangle duration is within minimum and maximum bounds
+				int triangleDuration = Math.abs(lowIndex1 - lowIndex2);
+				if (triangleDuration < minimumTriangleBars || triangleDuration > maximumTriangleBars) {
+					continue; // Skip if triangle duration is invalid
+				}
+
+				// Search for swing highs to form the resistance line, allowing a margin
+				int margin = 5; // Allow highs slightly before/after the triangle range
+				for (int k = 0; k < swingHighIndices.size(); k++) {
+					int highIndex1 = swingHighIndices.get(k);
+					if (highIndex1 < lowIndex2 - margin || highIndex1 > lowIndex1 + margin) {
+						continue; // High must be within the triangle range (older to newer)
+					}
+					double highPrice1 = stockDataList.get(highIndex1).getHigh();
+
+					// Find another swing high for resistance
+					for (int m = k + 1; m < swingHighIndices.size(); m++) {
+						int highIndex2 = swingHighIndices.get(m);
+						if (highIndex2 < lowIndex2 - margin || highIndex2 > lowIndex1 + margin) {
+							continue; // High must be within the triangle range
+						}
+						double highPrice2 = stockDataList.get(highIndex2).getHigh();
+
+						// Check if highs are within the specified resistance range
+						double avgHighPrice = (highPrice1 + highPrice2) / 2;
+						if (Math.abs(highPrice1 - highPrice2) / avgHighPrice > resistanceRange) {
+							continue; // Skip if highs are not flat enough
+						}
+
+						// Invalidate triangle if any bar after the newer low (lower index) has a close
+						// below the newer low's close
+						for (int n = lowIndex1 - 1; n >= 0; n--) {
+							if (stockDataList.get(n).getClose() < stockDataList.get(lowIndex1).getClose()) {
+								removeSwingLowFromTrianglePoints(trianglePoints, lowIndex1);
+								break;
+							}
+						}
+
+						// Store valid triangle points: [lowIndex1, lowIndex2, highIndex1, highIndex2]
+						trianglePoints.add(new int[] { lowIndex1, lowIndex2, highIndex1, highIndex2 });
 					}
 				}
 			}
 		}
 
-		if (swingHighIndices.size() < minTouches || swingHighIndices.get(0) > maxTriangleBars) {
-			return false;
-		}
+		// Step 3: Validate consolidation within the triangle for each set of points
+		double currentPrice = stockDataList.get(0).getClose(); // Use latest bar's close price
+		for (int i = 0; i < trianglePoints.size(); i++) {
+			int lowIndex1 = trianglePoints.get(i)[0]; // Newer low (later in time)
+			int lowIndex2 = trianglePoints.get(i)[1]; // Older low (earlier in time)
+			int highIndex1 = trianglePoints.get(i)[2];
+			int highIndex2 = trianglePoints.get(i)[3];
 
-		highIndex = swingHighIndices.get(0);
-		resistanceLevel = highestHigh;
+			double lowPrice1 = stockDataList.get(lowIndex1).getLow();
+			double lowPrice2 = stockDataList.get(lowIndex2).getLow();
+			double highPrice1 = stockDataList.get(highIndex1).getHigh();
+			double highPrice2 = stockDataList.get(highIndex2).getHigh();
 
-		double highsPercentage = 0.0;
-		if (swingHighIndices.size() >= 2) {
-			double minHigh = Double.MAX_VALUE;
-			double maxHigh = 0.0;
-			for (int i : swingHighIndices) {
-				double high = stockDataList.get(i).getHigh();
-				minHigh = Math.min(minHigh, high);
-				maxHigh = Math.max(maxHigh, high);
-			}
-			if (minHigh > 0.0) {
-				highsPercentage = (maxHigh - minHigh) / minHigh * 100;
-				if (highsPercentage >= maxHighsPercentage) {
-					// return false;
+			// Calculate resistance level as average of swing highs
+			double resistanceLevel = (highPrice1 + highPrice2) / 2;
+
+			// Calculate support line slope (price increase per bar, positive for ascending)
+			double supportSlope = (lowPrice1 - lowPrice2) / (lowIndex1 - lowIndex2);
+
+			boolean validClosing = true;
+			// Validate closes stay within triangle: above support line, below resistance
+			for (int j = lowIndex2; j >= lowIndex1; j--) { // Iterate from older to newer
+				// Calculate support price at index j using linear interpolation
+				double barsFromLow2 = j - lowIndex2;
+				double supportPrice = lowPrice2 + (supportSlope * barsFromLow2);
+				if (stockDataList.get(j).getClose() < supportPrice
+						|| stockDataList.get(j).getClose() > resistanceLevel) {
+					validClosing = false;
+					break;
 				}
 			}
-		}
+			if (!validClosing)
+				continue;
 
-		List<Integer> swingLowIndices = new ArrayList<>();
-		for (int i = 1; i <= maxTriangleBars && i < stockDataList.size(); i++) {
-			if ("L".equals(stockDataList.get(i).getSwingType())) {
-				double currentLow = stockDataList.get(i).getLow();
-				if (swingLowIndices.isEmpty()
-						|| currentLow < stockDataList.get(swingLowIndices.get(swingLowIndices.size() - 1)).getLow()) {
-					swingLowIndices.add(i);
-				}
+			// Check if current price is within the triangle's consolidation range
+			double latestSupportPrice = lowPrice2 + (supportSlope * (lowIndex1 - lowIndex2));
+			if (currentPrice >= latestSupportPrice && currentPrice <= resistanceLevel) {
+				// Create Pattern object with static metrics from StockDataInfo
+				Pattern pattern = Pattern.builder().patternName(patternType).stockData(stockDataList.get(0))
+						.head(sd.head_0).tail(sd.tail_0).body0(sd.body_0).build();
+
+				// Calculate metrics for rank string
+				int triangleDays = Math.abs(lowIndex1 - lowIndex2);
+				double supportSlopePercent = (supportSlope / lowPrice2) * 100;
+				double triangleHeight = resistanceLevel - lowPrice2;
+				double triangleHeightPercent = (triangleHeight / resistanceLevel) * 100;
+				double proximityToResistance = ((currentPrice - resistanceLevel) / resistanceLevel) * 100;
+
+				// Format rank string with triangle details
+				String rankStr = String.format(
+						"Older Low Date:%s Low Price:%.2f Newer Low Date:%s Low Price:%.2f "
+								+ "Resistance Level:%.2f Support Slope:%.2f%% Triangle Days:%d "
+								+ "Triangle Height:%.2f Height:%.2f%% Proximity to Resistance:%.2f%%",
+						stockDataList.get(lowIndex2).getDate().toString(), lowPrice2,
+						stockDataList.get(lowIndex1).getDate().toString(), lowPrice1, resistanceLevel,
+						supportSlopePercent, triangleDays, triangleHeight, triangleHeightPercent,
+						proximityToResistance);
+				pattern.setRank(highIndex1 * -1); // Prioritize newer highs for ascending sort
+				pattern.setRankStr(rankStr);
+
+				// Store pattern in results map and return success
+				patternResults.computeIfAbsent(patternType, k -> new ArrayList<>()).add(pattern);
+				return true;
 			}
 		}
 
-		if (swingLowIndices.size() < minTouches || swingLowIndices.get(0) > maxTriangleBars) {
-			return false;
-		}
+		// No valid ascending triangle found
+		return false;
+	}
 
-		double supportSlope = 0.0;
-		if (swingLowIndices.size() >= 2) {
-			double sumX = 0.0, sumY = 0.0, sumXY = 0.0, sumXX = 0.0;
-			int n = swingLowIndices.size();
-			for (int index : swingLowIndices) {
-				double x = -index;
-				double y = stockDataList.get(index).getLow();
-				sumX += x;
-				sumY += y;
-				sumXY += x * y;
-				sumXX += x * x;
-			}
-			double xMean = sumX / n;
-			double yMean = sumY / n;
-			supportSlope = (sumXY - n * xMean * yMean) / (sumXX - n * xMean * xMean);
-		}
-
-		double triangleMinLow = Double.MAX_VALUE;
-		double triangleMaxHigh = resistanceLevel;
-		int earliestIndex = Math.max(highIndex, swingLowIndices.get(0));
-		int latestIndex = Math.min(highIndex, swingLowIndices.get(0));
-		for (int i = earliestIndex - 1; i >= 0; i--) {
-			triangleMaxHigh = Math.max(triangleMaxHigh, stockDataList.get(i).getHigh());
-			triangleMinLow = Math.min(triangleMinLow, stockDataList.get(i).getLow());
-		}
-		double triangleRange = (triangleMaxHigh - triangleMinLow) / triangleMinLow * 100;
-		if (triangleRange > maxTriangleRange) {
-			return false;
-		}
-
-		LocalDate startDate = stockDataList.get(earliestIndex).getDate();
-		LocalDate endDate = stockDataList.get(0).getDate();
-		int triangleDuration = earliestIndex;
-
-		if (startDate == null || endDate == null || !startDate.isBefore(endDate)) {
-			return false;
-		}
-
-		double lastTwoLowsPercentage = 0.0;
-		if (swingLowIndices.size() >= 2) {
-			double recentLow = stockDataList.get(swingLowIndices.get(0)).getLow();
-			double previousLow = stockDataList.get(swingLowIndices.get(1)).getLow();
-			lastTwoLowsPercentage = (recentLow - previousLow) / previousLow * 100;
-		}
-
-		double rankScore = 0.0;
-		if (swingLowIndices.size() >= 2 && swingHighIndices.size() >= 2) {
-			double touchesScore = ((double) (swingHighIndices.size() + swingLowIndices.size()) - 4) / (10 - 4) * 100;
-			touchesScore = Math.max(0, Math.min(100, touchesScore));
-
-			double rangeScore = (1 - (triangleRange / 20.0)) * 100;
-			double lowsSpreadScore = (1 - (lastTwoLowsPercentage / maxLastTwoLowsPercentage)) * 100;
-			rangeScore = Math.max(0, (rangeScore + lowsSpreadScore) / 2);
-
-			double timeScore = 100.0;
-			if (swingLowIndices.size() >= 2) {
-				int minLowBarDistance = Integer.MAX_VALUE;
-				for (int i = 1; i < swingLowIndices.size(); i++) {
-					int distance = swingLowIndices.get(i - 1) - swingLowIndices.get(i);
-					minLowBarDistance = Math.min(minLowBarDistance, distance);
-				}
-				timeScore = ((double) minLowBarDistance / minBarsBetweenLows) * 100;
-				timeScore = Math.max(0, Math.min(100, timeScore));
-			}
-
-			double slopeScore = (1 - Math.abs(supportSlope - idealSlope) / maxSlopeDeviation) * 100;
-			slopeScore = Math.max(0, Math.min(100, slopeScore));
-
-			double recencyScore = (1 - ((double) latestIndex / maxTriangleBars)) * 100;
-			recencyScore = Math.max(0, Math.min(100, recencyScore));
-
-			rankScore = 0.35 * touchesScore + 0.25 * rangeScore + 0.20 * timeScore + 0.15 * slopeScore
-					+ 0.10 * recencyScore;
-		}
-
-		StringBuilder highTouchDates = new StringBuilder();
-		StringBuilder highTouchPrices = new StringBuilder();
-		for (int index : swingHighIndices) {
-			LocalDate date = stockDataList.get(index).getDate();
-			double price = stockDataList.get(index).getHigh();
-			if (date != null) {
-				highTouchDates.append(date.toString()).append(",");
-				highTouchPrices.append(String.format("%.2f", price)).append(",");
-			}
-		}
-		if (highTouchDates.length() > 0) {
-			highTouchDates.setLength(highTouchDates.length() - 1);
-			highTouchPrices.setLength(highTouchPrices.length() - 1);
-		}
-
-		StringBuilder lowTouchDates = new StringBuilder();
-		StringBuilder lowTouchPrices = new StringBuilder();
-		for (int index : swingLowIndices) {
-			LocalDate date = stockDataList.get(index).getDate();
-			double price = stockDataList.get(index).getLow();
-			if (date != null) {
-				lowTouchDates.append(date.toString()).append(",");
-				lowTouchPrices.append(String.format("%.2f", price)).append(",");
-			}
-		}
-		if (lowTouchDates.length() > 0) {
-			lowTouchDates.setLength(lowTouchDates.length() - 1);
-			lowTouchPrices.setLength(lowTouchPrices.length() - 1);
-		}
-
-		Pattern pattern = Pattern.builder().patternName(type).stockData(stockDataList.get(0)).head(sd.head_0)
-				.tail(sd.tail_0).body0(sd.body_0).rank(rankScore).country(config.country).build();
-		String rankStr = " ResistanceLevel:" + String.format("%.2f", resistanceLevel) + " SupportLow:"
-				+ String.format("%.2f", triangleMinLow) + " StartDate:"
-				+ (startDate != null ? startDate.toString() : "N/A") + " EndDate:"
-				+ (endDate != null ? endDate.toString() : "N/A") + " LatestClose:" + String.format("%.2f", latestClose)
-				+ " TriangleRange:" + String.format("%.2f%%", triangleRange) + " TriangleDuration:" + triangleDuration
-				+ " HighTouches:" + swingHighIndices.size() + " LowTouches:" + swingLowIndices.size()
-				+ " HighTouchDates:" + (highTouchDates.length() > 0 ? highTouchDates.toString() : "N/A")
-				+ " LowTouchDates:" + (lowTouchDates.length() > 0 ? lowTouchDates.toString() : "N/A")
-				+ " HighsPercentage:" + String.format("%.2f%%", highsPercentage) + " LastTwoLowsPercentage:"
-				+ String.format("%.2f%%", lastTwoLowsPercentage) + " SupportSlope:"
-				+ (swingLowIndices.size() >= 2 ? String.format("%.2f", supportSlope) : "N/A") + " HighTouchPrices:"
-				+ (highTouchPrices.length() > 0 ? highTouchPrices.toString() : "N/A") + " LowTouchPrices:"
-				+ (lowTouchPrices.length() > 0 ? lowTouchPrices.toString() : "N/A") + " RankScore:"
-				+ String.format("%.2f", rankScore);
-		pattern.setRankStr(rankStr);
-		patternResults.computeIfAbsent(type, k -> new ArrayList<>()).add(pattern);
-		return true;
+	// Removes all entries with the specified swing low index from the triangle
+	// points list
+	private void removeSwingLowFromTrianglePoints(List<int[]> trianglePoints, int lowIndex) {
+		trianglePoints.removeIf(pair -> pair[0] == lowIndex || pair[1] == lowIndex);
 	}
 
 	private boolean shootingStar(String symbol, List<StockData> stockDataList) {
@@ -1763,25 +1754,8 @@ public class DataInjestionServiceNSEImpl {
 		return false;
 	}
 
-	public void getRestingStocksAfterBurst() {
-		MarketConfig config = marketConfigs.get(Market.NSE); // Default to NSE, adjust if needed
-		if (config == null)
-			return;
-
-		List<String> patternNames = Arrays.asList("Gapup", "PowerUpCandle", "PurpleDot");
-		LocalDate endDate = LocalDate.now();
-		LocalDate startDate = endDate;
-		int businessDaysToSubtract = 45;
-
-		while (businessDaysToSubtract > 0) {
-			startDate = startDate.minusDays(1);
-			if (startDate.getDayOfWeek() != DayOfWeek.SATURDAY && startDate.getDayOfWeek() != DayOfWeek.SUNDAY) {
-				businessDaysToSubtract--;
-			}
-		}
-
-		List<Pattern> results = patternRepository.findDistinctByPatternNameInAndCountryEqualsAndDateRange(patternNames,
-				config.country, startDate, endDate);
+	public void getRestingStocksAfterBurst(Market market) {
+		List<Pattern> results = getPatternsFromDB(market);
 
 		patternResultsSet.clear();
 		for (Pattern pattern : results) {
@@ -1800,6 +1774,10 @@ public class DataInjestionServiceNSEImpl {
 
 			StockDataInfo sd = new StockDataInfo(stockDataList);
 
+			double adr = calculateADR(stockDataList, 20);
+			if (market == Market.US && (adr < 3.5 || sd.close_0 < 20 || sd.close_0 > 1000))
+				continue;
+
 			int indexFound = -1;
 
 			for (int i = 0; i < stockDataList.size(); i++) {
@@ -1815,9 +1793,9 @@ public class DataInjestionServiceNSEImpl {
 
 			for (int j = indexFound; j > 0; j--) {
 
-				double percentage = (pattern.getClose().doubleValue() - stockDataList.get(j).getClose())
+				double percentage = (stockDataList.get(j).getClose() - pattern.getClose().doubleValue())
 						/ pattern.getClose().doubleValue() * 100;
-				if (percentage > 5 || percentage < -5) {
+				if (percentage > 10) {
 					validPattern = false;
 					break;
 				}
@@ -1828,6 +1806,14 @@ public class DataInjestionServiceNSEImpl {
 
 			BBValues bb = calculateBBAndMaValues(pattern.getSymbol(), stockDataList, 0);
 
+			if (bb == null || bb != null && sd.close_0 > bb.getMa_50() && sd.close_0 > bb.getMa_50()
+					&& bb.getMa_20() > bb.getMa_50()) {
+				// validPattern = false;
+			}
+
+			if (!validPattern)
+				continue;
+
 			String type = "BurstRetracement";
 
 			StockData sd1 = new StockData();
@@ -1835,13 +1821,38 @@ public class DataInjestionServiceNSEImpl {
 			pattern.setStockData(sd1);
 			pattern.setMaDistance(sd.getClose_0() - bb.getMa_10());
 			String rankStr = "Pattern:" + pattern.getPatternName() + " On:" + pattern.getDate() + " MA10 distance "
-					+ Double.toString(pattern.getMaDistance());
+					+ Double.toString(pattern.getMaDistance()) + " ADR:" + Double.toString(adr);
 			pattern.setRankStr(rankStr);
 			patternResults.computeIfAbsent(type, k -> new ArrayList<>()).add(pattern);
 			patternResultsSet.add(pattern.getSymbol());
 
 		}
 
+	}
+
+	private List<Pattern> getPatternsFromDB(Market market) {
+		MarketConfig config = marketConfigs.get(market);
+		if (config == null)
+			return null;
+
+		List<String> patternNames = Arrays.asList("PowerUpCandle", "PurpleDot");
+		LocalDate endDate = LocalDate.now();
+		LocalDate startDate = endDate;
+		int businessDaysToSubtract = 21;
+
+		if (market == Market.US)
+			businessDaysToSubtract = 15;
+
+		while (businessDaysToSubtract > 0) {
+			startDate = startDate.minusDays(1);
+			if (startDate.getDayOfWeek() != DayOfWeek.SATURDAY && startDate.getDayOfWeek() != DayOfWeek.SUNDAY) {
+				businessDaysToSubtract--;
+			}
+		}
+
+		List<Pattern> results = patternRepository.findDistinctByPatternNameInAndCountryEqualsAndDateRange(patternNames,
+				config.country, startDate, endDate);
+		return results;
 	}
 
 	private boolean findVolumeShockers(Market market, String symbol, List<StockData> stockDataList) {
@@ -1897,36 +1908,34 @@ public class DataInjestionServiceNSEImpl {
 	}
 
 	private void markSwingHighsAndLows(String symbol, List<StockData> stockDataList) {
-		if (stockDataList.size() < 3) {
-			// Cannot mark swings if there are less than 3 data points
-			return;
+		if (stockDataList == null || stockDataList.size() < 5) {
+			return; // Need at least 5 bars for ±2-bar window
 		}
 
-		for (int i = 1; i < stockDataList.size() - 1; i++) {
+		int window = 2; // Check 2 bars before and after
+
+		for (int i = 0; i < stockDataList.size(); i++) {
 			StockData current = stockDataList.get(i);
-			StockData prev = stockDataList.get(i - 1);
-			StockData next = stockDataList.get(i + 1);
-
-			if (current.getHigh() > prev.getHigh() && current.getHigh() > next.getHigh()) {
-				// Current price is higher than the previous and next prices, marking as swing
-				// high
-				current.setSwingType("H");
-			} else if (current.getLow() < prev.getLow() && current.getLow() < next.getLow()) {
-				// Current price is lower than the previous and next prices, marking as swing
-				// low
-				current.setSwingType("L");
-			} else {
-				// Not a swing high or swing low
+			if (current.getHigh() <= 0 || current.getLow() <= 0) {
 				current.setSwingType("");
+				continue;
 			}
 
-			boolean isPurpleDot = isPurpleCandle(current);
-			current.setPurpleDotType("");
-			if (isPurpleDot && current.getClose() > current.getOpen()) {
-				current.setPurpleDotType("GP");
-			} else if (isPurpleDot && current.getClose() > current.getOpen()) {
-				current.setPurpleDotType("RP");
+			boolean isSwingHigh = true;
+			boolean isSwingLow = true;
+
+			// Compare with bars in ±2 window
+			for (int j = Math.max(0, i - window); j <= Math.min(stockDataList.size() - 1, i + window); j++) {
+				if (j == i)
+					continue;
+				StockData other = stockDataList.get(j);
+				if (other.getHigh() >= current.getHigh())
+					isSwingHigh = false;
+				if (other.getLow() <= current.getLow())
+					isSwingLow = false;
 			}
+
+			current.setSwingType(isSwingHigh ? "H" : isSwingLow ? "L" : "");
 		}
 	}
 
@@ -2022,7 +2031,7 @@ public class DataInjestionServiceNSEImpl {
 
 	private void watchList() {
 		File folder = new File("C:\\Users\\USER\\OneDrive - RamGenix\\ASX\\");
-		File[] files = folder.listFiles((dir, name) -> name.matches(".*Watchlist-.+\\.txt"));
+		File[] files = folder.listFiles((dir, name) -> name.matches(".*Watchlist-US-*.+\\.txt"));
 
 		if (files == null) {
 			System.out.println("No Watchlist file found.");
@@ -2114,7 +2123,7 @@ public class DataInjestionServiceNSEImpl {
 			// Writing patterns in a 3-column layout
 			writer.println("<div class=\"container-fluid\">");
 			writer.println("<h2>" + patternName + " Patterns for " + (saveToTable ? "Incremental" : date) + " ("
-					+ config.country + ")</h2>");
+					+ config.country + ")</h2>" + " Count : " + results.size());
 			writer.println("<div class=\"row\">");
 
 			int count = 0;
@@ -2241,7 +2250,7 @@ public class DataInjestionServiceNSEImpl {
 
 		StockDataInfo sd = new StockDataInfo(stockDataList);
 
-		if (sd.volume_0 < 50000)
+		if (sd.volume_0 < 100000)
 			return false;
 
 		if (sd.volume_0 > (sd.volume_1 * 2) && sd.close_0 > sd.open_0 && sd.close_0 > sd.close_1
