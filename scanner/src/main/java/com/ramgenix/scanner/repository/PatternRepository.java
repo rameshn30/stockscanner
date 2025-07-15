@@ -41,7 +41,7 @@ public interface PatternRepository extends JpaRepository<Pattern, Long> {
 	List<Pattern> findDistinctByPatternNameInAndDateRange(@Param("patternNames") List<String> patternNames,
 			@Param("startDate") LocalDate startDate, @Param("endDate") LocalDate endDate);
 
-	@Query("SELECT DISTINCT p FROM Pattern p WHERE p.patternName IN :patternNames AND p.country = :country AND p.date BETWEEN :startDate AND :endDate ORDER BY p.date ASC")
+	@Query("SELECT DISTINCT p FROM Pattern p WHERE p.patternName IN :patternNames AND p.country = :country AND p.date BETWEEN :startDate AND :endDate ORDER BY p.date DESC")
 	List<Pattern> findDistinctByPatternNameInAndCountryEqualsAndDateRange(
 			@Param("patternNames") List<String> patternNames, @Param("country") String country,
 			@Param("startDate") LocalDate startDate, @Param("endDate") LocalDate endDate);

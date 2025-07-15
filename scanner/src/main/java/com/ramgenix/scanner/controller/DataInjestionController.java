@@ -39,6 +39,7 @@ public class DataInjestionController {
 	public ResponseEntity<String> processLatestData(
 			@RequestParam(value = "watchlist", required = false) String watchlist,
 			@RequestParam(value = "past", required = false) String past,
+			@RequestParam(value = "timeframe", required = false, defaultValue = "daily") String timeframe,
 			@RequestParam(value = "market", required = false, defaultValue = "NSE") String market) {
 		try {
 			Market marketEnum;
@@ -50,9 +51,9 @@ public class DataInjestionController {
 			}
 
 			if (past != null && past.equals("past")) {
-				service.processLatestDataForPast(marketEnum, watchlist);
+				service.processLatestDataForPast(marketEnum, timeframe, watchlist);
 			} else {
-				service.processLatestData(marketEnum, watchlist);
+				service.processLatestData(marketEnum, timeframe, watchlist);
 			}
 			return ResponseEntity.ok("Success");
 		} catch (Exception e) {
