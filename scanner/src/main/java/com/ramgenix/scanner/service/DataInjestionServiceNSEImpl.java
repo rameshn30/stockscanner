@@ -90,6 +90,7 @@ public class DataInjestionServiceNSEImpl {
 		patternToFileNameMap.put("AscendingTriangle", "AscendingTriangle");
 
 		patternToFileNameMap.put("Hammer", "1_Hammer");
+		patternToFileNameMap.put("BottomTail", "BottomTail");
 		patternToFileNameMap.put("PBS", "PBS");
 		patternToFileNameMap.put("BullishEngulfing", "BullishEngulfing");
 		patternToFileNameMap.put("Pierce", "Pierce");
@@ -117,7 +118,7 @@ public class DataInjestionServiceNSEImpl {
 	Map<String, List<Pattern>> patternResults = new ConcurrentHashMap<>();
 	Set<String> patternResultsSet = new HashSet<>();
 	String outputFilePath = "C:\\Users\\USER\\OneDrive - RamGenix\\ASX\\newhtml\\";
-	private String stockchartsurl = "p=D&yr=0&mn=6&dy=0&i=t6030530215c&r=1752501883907";
+	private String stockchartsurl = "p=D&yr=0&mn=6&dy=0&i=t3140059700c&r=1752588189290";
 	Set<String> inputWatchList = new HashSet<>();
 	String watchlist = "";
 
@@ -268,8 +269,11 @@ public class DataInjestionServiceNSEImpl {
 		if (result)
 			return true;
 
-		result = pbs(symbol, stockDataList);
+		result = findBottomTailStocks(symbol, stockDataList);
+		if (result)
+			return true;
 
+		result = pbs(symbol, stockDataList);
 		if (result)
 			return true;
 
@@ -643,12 +647,37 @@ public class DataInjestionServiceNSEImpl {
 
 	}
 
+	private boolean findBottomTailStocks(String symbol, List<StockData> stockDataList) {
+		String type = "BottomTail";
+		StockDataInfo sd = new StockDataInfo(stockDataList);
+		MarketConfig config = marketConfigs.get(Market.NSE); // Default to NSE, adjust if needed
+		if (config == null)
+			return false;
+
+		if (sd.tail_0 >= (1 * sd.body_0) && sd.low_0 <= sd.low_1 && (sd.head_0 == 0 || (sd.tail_0 / sd.head_0) > 2)) {
+
+			Pattern pattern = Pattern.builder().bbValues(bbValues).patternName(type).stockData(stockDataList.get(0))
+					.head(sd.head_0).tail(sd.tail_0).body0(sd.body_0).country(config.country).build();
+
+			pattern.setRank(sd.tail_0);
+			pattern.setRankStr("sd.tail_0:" + sd.tail_0);
+			patternResults.computeIfAbsent(type, k -> new ArrayList<>()).add(pattern);
+
+			savePattern(pattern, type, sd);
+			return true;
+		}
+		return false;
+
+	}
+
 	private boolean bullishEngulfing(String symbol, List<StockData> stockDataList) {
 		String type = "BullishEngulfing";
 
 		StockDataInfo sd = new StockDataInfo(stockDataList);
+		double bodyThreshold = sd.close_1 * 0.01; // 1% of the closing price
 
-		if (sd.close_0 > sd.open_0 && (sd.close_1 < sd.open_1 || sd.close_2 < sd.open_2) && sd.body_0 > 5
+		if (sd.close_0 > sd.open_0 && (sd.close_1 < sd.open_1 || sd.close_2 < sd.open_2) && sd.body_0 > bodyThreshold
+
 				&& (sd.body_0 > sd.body_1 || sd.close_0 > sd.open_1)) {
 			Pattern pattern = Pattern.builder().bbValues(bbValues).patternName(type).stockData(stockDataList.get(0))
 					.head(sd.head_0).tail(sd.tail_0).body0(sd.body_0).build();
@@ -779,11 +808,12 @@ public class DataInjestionServiceNSEImpl {
 
 		if (stockDataList == null || stockDataList.isEmpty() || !volumeCheck(stockDataList)
 				|| !priceCheck(stockDataList)) {
-			System.out.println("Return false at " + symbol
-					+ ": Invalid stock data (null, empty, or volume check failed) at index 0 ("
-					+ (stockDataList != null && !stockDataList.isEmpty() ? stockDataList.get(0).getDate().toString()
-							: "N/A")
-					+ ")");
+			/*
+			 * System.out.println("Return false at " + symbol +
+			 * ": Invalid stock data (null, empty, or volume check failed) at index 0 (" +
+			 * (stockDataList != null && !stockDataList.isEmpty() ?
+			 * stockDataList.get(0).getDate().toString() : "N/A") + ")");
+			 */
 			return false;
 		}
 
@@ -985,11 +1015,12 @@ public class DataInjestionServiceNSEImpl {
 
 		// Validate input data: check for null, empty list, price, and volume conditions
 		if (stockDataList == null || stockDataList.isEmpty() || !volumeCheck(stockDataList)) {
-			System.out.println("Return false at " + symbol
-					+ ": Invalid stock data (null, empty, or volume check failed) at index 0 ("
-					+ (stockDataList != null && !stockDataList.isEmpty() ? stockDataList.get(0).getDate().toString()
-							: "N/A")
-					+ ")");
+			/*
+			 * System.out.println("Return false at " + symbol +
+			 * ": Invalid stock data (null, empty, or volume check failed) at index 0 (" +
+			 * (stockDataList != null && !stockDataList.isEmpty() ?
+			 * stockDataList.get(0).getDate().toString() : "N/A") + ")");
+			 */
 			return false;
 		}
 
@@ -998,9 +1029,11 @@ public class DataInjestionServiceNSEImpl {
 
 		BBValues bb = calculateBBAndMaValues(symbol, stockDataList, 0);
 		if (!"Weekly".equalsIgnoreCase(timeframe) && !(bb != null && bb.getMa_20() > bb.getMa_50())) {
-			System.out.println(
-					"Return false at " + symbol + ": MA_20 not greater than MA_50 or BB values null at index 0 ("
-							+ stockDataList.get(0).getDate().toString() + ")");
+			/*
+			 * System.out.println( "Return false at " + symbol +
+			 * ": MA_20 not greater than MA_50 or BB values null at index 0 (" +
+			 * stockDataList.get(0).getDate().toString() + ")");
+			 */
 			return false;
 		}
 
@@ -1010,9 +1043,11 @@ public class DataInjestionServiceNSEImpl {
 			if (adr > 3.5) {
 				// OK, skip further checks
 			} else if (adr <= 2.5 || sd.close_0 <= 50 || sd.volume_0 <= 500000) {
-				System.out.println("Return false at " + symbol
-						+ ": ADR <= 2.5 or close <= 50 or volume <= 500000 for US market at index 0 ("
-						+ stockDataList.get(0).getDate().toString() + ")");
+				/*
+				 * System.out.println("Return false at " + symbol +
+				 * ": ADR <= 2.5 or close <= 50 or volume <= 500000 for US market at index 0 ("
+				 * + stockDataList.get(0).getDate().toString() + ")");
+				 */
 				return false;
 			}
 		} else {
@@ -1030,16 +1065,21 @@ public class DataInjestionServiceNSEImpl {
 		}
 
 		if (market == Market.US && (sd.close_0 < 20 || sd.close_0 > 1000)) {
-			System.out
-					.println("Return false at " + symbol + ": Close price outside [20, 1000] for US market at index 0 ("
-							+ stockDataList.get(0).getDate().toString() + ")");
+			/*
+			 * System.out .println("Return false at " + symbol +
+			 * ": Close price outside [20, 1000] for US market at index 0 (" +
+			 * stockDataList.get(0).getDate().toString() + ")");
+			 */
 			return false;
 		}
 
 		List<Pattern> patternsFromDB = getPatternsFromDB(market);
 		if (patternsFromDB == null || patternsFromDB.isEmpty()) {
-			System.out.println("Return false at " + symbol + ": No patterns found in DB for market " + market
-					+ " at index 0 (" + stockDataList.get(0).getDate().toString() + ")");
+			/*
+			 * System.out.println("Return false at " + symbol +
+			 * ": No patterns found in DB for market " + market + " at index 0 (" +
+			 * stockDataList.get(0).getDate().toString() + ")");
+			 */
 			return false;
 		}
 
@@ -1092,7 +1132,8 @@ public class DataInjestionServiceNSEImpl {
 			}
 		}
 
-		System.out.println("Symbol:" + symbol + " flagpoleList size " + flagpoleList.size());
+		// System.out.println("Symbol:" + symbol + " flagpoleList size " +
+		// flagpoleList.size());
 
 		// Step 3: Validate bull flags for each flagpole
 		double currentPrice = stockDataList.get(0).getClose(); // Use latest bar's close price
@@ -1101,9 +1142,12 @@ public class DataInjestionServiceNSEImpl {
 			int swingLowIndex = flagpoleList.get(i)[0];
 
 			if (swingHighIndex < minimumSwingHighIndex) {
-				System.out.println("Continue at " + symbol + ": Swing high index " + swingHighIndex + " below minimum "
-						+ minimumSwingHighIndex + " at index " + swingHighIndex + " ("
-						+ stockDataList.get(swingHighIndex).getDate().toString() + ")");
+				/*
+				 * System.out.println("Continue at " + symbol + ": Swing high index " +
+				 * swingHighIndex + " below minimum " + minimumSwingHighIndex + " at index " +
+				 * swingHighIndex + " (" +
+				 * stockDataList.get(swingHighIndex).getDate().toString() + ")");
+				 */
 				continue;
 			}
 
@@ -1113,9 +1157,11 @@ public class DataInjestionServiceNSEImpl {
 			// Skip if current price exceeds swing high, as consolidation should be at or
 			// below
 			if (currentPrice > flagPoleHighPrice) {
-				System.out.println("Continue at " + symbol + ": Current price " + currentPrice
-						+ " exceeds flagpole high " + flagPoleHighPrice + " at index 0 ("
-						+ stockDataList.get(0).getDate().toString() + ")");
+				/*
+				 * System.out.println("Continue at " + symbol + ": Current price " +
+				 * currentPrice + " exceeds flagpole high " + flagPoleHighPrice +
+				 * " at index 0 (" + stockDataList.get(0).getDate().toString() + ")");
+				 */
 				continue;
 			}
 
@@ -1123,10 +1169,12 @@ public class DataInjestionServiceNSEImpl {
 			// Check consolidation duration
 			int consolidationDuration = swingHighIndex - 0;
 			if (consolidationDuration > 20) {
-				System.out.println("Continue at " + symbol + ": Consolidation duration " + consolidationDuration
-						+ " outside [5, 20] at index " + swingHighIndex + " ("
-						+ stockDataList.get(swingHighIndex).getDate().toString() + ") to index 0 ("
-						+ stockDataList.get(0).getDate().toString() + ")");
+				/*
+				 * System.out.println("Continue at " + symbol + ": Consolidation duration " +
+				 * consolidationDuration + " outside [5, 20] at index " + swingHighIndex + " ("
+				 * + stockDataList.get(swingHighIndex).getDate().toString() + ") to index 0 (" +
+				 * stockDataList.get(0).getDate().toString() + ")");
+				 */
 				continue;
 			}
 
@@ -1141,9 +1189,12 @@ public class DataInjestionServiceNSEImpl {
 				}
 			}
 			if (dropsOverFourPercent > 1) {
-				System.out.println("Continue at " + symbol + ": >1 bar with >4% drop during consolidation, e.g., index "
-						+ (swingHighIndex - 1) + " (" + stockDataList.get(swingHighIndex - 1).getDate().toString()
-						+ ")");
+				/*
+				 * System.out.println("Continue at " + symbol +
+				 * ": >1 bar with >4% drop during consolidation, e.g., index " + (swingHighIndex
+				 * - 1) + " (" + stockDataList.get(swingHighIndex - 1).getDate().toString() +
+				 * ")");
+				 */
 				continue;
 			}
 
@@ -1151,9 +1202,12 @@ public class DataInjestionServiceNSEImpl {
 			double range = flagPoleHighPrice - flagPoleLowPrice;
 			double thirtyEightPercentRetracement = flagPoleHighPrice - (range * 0.38);
 			if (currentPrice < thirtyEightPercentRetracement) {
-				System.out.println("Continue at " + symbol + ": Current price " + currentPrice
-						+ " below 38% retracement level " + thirtyEightPercentRetracement + " at index 0 ("
-						+ stockDataList.get(0).getDate().toString() + ")");
+				/*
+				 * System.out.println("Continue at " + symbol + ": Current price " +
+				 * currentPrice + " below 38% retracement level " +
+				 * thirtyEightPercentRetracement + " at index 0 (" +
+				 * stockDataList.get(0).getDate().toString() + ")");
+				 */
 				continue;
 			}
 
