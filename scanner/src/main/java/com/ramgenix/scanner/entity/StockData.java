@@ -38,5 +38,12 @@ public class StockData {
 	String purpleDotType;
 
 	@Transient
+	private double ma10;
+	@Transient
+	private double ma20;
+	@Transient
+	private double ma50;
+
+	@Transient
 	private LocalDate date; // Using LocalDate for better date representation
 }

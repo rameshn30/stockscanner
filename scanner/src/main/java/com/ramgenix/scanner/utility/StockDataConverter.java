@@ -1,6 +1,5 @@
 package com.ramgenix.scanner.utility;
 
-import java.time.LocalDate;
 import java.time.temporal.WeekFields;
 import java.util.ArrayList;
 import java.util.List;
@@ -155,71 +154,4 @@ public class StockDataConverter {
 		}
 	}
 
-	public static void main(String[] args) {
-		// Create sample data for two weeks (July 7-11, 2025 and June 30-July 4, 2025)
-		Map<String, List<StockData>> stockDataMap = new ConcurrentHashMap<>();
-
-		// Sample data for AAPL
-		List<StockData> aaplData = new ArrayList<>();
-		// Week 1: July 7-11, 2025 (Monday to Friday)
-		aaplData.add(new StockData(null, "AAPL", "EQ", 150.00, 152.50, 149.00, 151.75, 1000, "Bullish", "Buy",
-				LocalDate.of(2025, 7, 11)));
-		aaplData.add(new StockData(null, "AAPL", "EQ", 149.50, 151.00, 148.50, 150.25, 900, "Neutral", "Hold",
-				LocalDate.of(2025, 7, 10)));
-		aaplData.add(new StockData(null, "AAPL", "EQ", 148.00, 150.00, 147.50, 149.50, 800, "Neutral", "Hold",
-				LocalDate.of(2025, 7, 9)));
-		aaplData.add(new StockData(null, "AAPL", "EQ", 147.00, 149.00, 146.50, 148.25, 700, "Bearish", "Sell",
-				LocalDate.of(2025, 7, 8)));
-		aaplData.add(new StockData(null, "AAPL", "EQ", 146.00, 148.00, 145.50, 147.50, 600, "Bearish", "Sell",
-				LocalDate.of(2025, 7, 7)));
-		// Week 2: June 30-July 4, 2025 (Monday to Friday)
-		aaplData.add(new StockData(null, "AAPL", "EQ", 145.00, 147.00, 144.50, 146.25, 500, "Neutral", "Hold",
-				LocalDate.of(2025, 7, 4)));
-		aaplData.add(new StockData(null, "AAPL", "EQ", 144.50, 146.00, 144.00, 145.50, 400, "Neutral", "Hold",
-				LocalDate.of(2025, 7, 3)));
-		aaplData.add(new StockData(null, "AAPL", "EQ", 144.00, 145.50, 143.50, 145.00, 300, "Bullish", "Buy",
-				LocalDate.of(2025, 7, 2)));
-		aaplData.add(new StockData(null, "AAPL", "EQ", 143.00, 144.50, 142.50, 144.00, 200, "Bullish", "Buy",
-				LocalDate.of(2025, 7, 1)));
-		aaplData.add(new StockData(null, "AAPL", "EQ", 142.00, 143.50, 141.50, 143.00, 100, "Neutral", "Hold",
-				LocalDate.of(2025, 6, 30)));
-		stockDataMap.put("AAPL", aaplData);
-
-		// Sample data for GOOGL
-		List<StockData> googlData = new ArrayList<>();
-		// Week 1: July 7-11, 2025
-		googlData.add(new StockData(null, "GOOGL", "EQ", 2800.00, 2820.00, 2790.00, 2815.75, 2000, "Bullish", "Buy",
-				LocalDate.of(2025, 7, 11)));
-		googlData.add(new StockData(null, "GOOGL", "EQ", 2790.00, 2810.00, 2780.00, 2800.00, 1800, "Neutral", "Hold",
-				LocalDate.of(2025, 7, 10)));
-		googlData.add(new StockData(null, "GOOGL", "EQ", 2780.00, 2800.00, 2770.00, 2790.00, 1600, "Neutral", "Hold",
-				LocalDate.of(2025, 7, 9)));
-		googlData.add(new StockData(null, "GOOGL", "EQ", 2770.00, 2790.00, 2760.00, 2780.00, 1400, "Bearish", "Sell",
-				LocalDate.of(2025, 7, 8)));
-		googlData.add(new StockData(null, "GOOGL", "EQ", 2760.00, 2780.00, 2750.00, 2770.00, 1200, "Bearish", "Sell",
-				LocalDate.of(2025, 7, 7)));
-		// Week 2: June 30-July 4, 2025
-		googlData.add(new StockData(null, "GOOGL", "EQ", 2750.00, 2770.00, 2740.00, 2760.00, 1000, "Neutral", "Hold",
-				LocalDate.of(2025, 7, 4)));
-		googlData.add(new StockData(null, "GOOGL", "EQ", 2740.00, 2760.00, 2730.00, 2750.00, 800, "Neutral", "Hold",
-				LocalDate.of(2025, 7, 3)));
-		googlData.add(new StockData(null, "GOOGL", "EQ", 2730.00, 2750.00, 2720.00, 2740.00, 600, "Bullish", "Buy",
-				LocalDate.of(2025, 7, 2)));
-		googlData.add(new StockData(null, "GOOGL", "EQ", 2720.00, 2740.00, 2710.00, 2730.00, 400, "Bullish", "Buy",
-				LocalDate.of(2025, 7, 1)));
-		googlData.add(new StockData(null, "GOOGL", "EQ", 2710.00, 2730.00, 2700.00, 2720.00, 200, "Neutral", "Hold",
-				LocalDate.of(2025, 6, 30)));
-		stockDataMap.put("GOOGL", googlData);
-
-		StockDataConverter converter = new StockDataConverter();
-
-		// Print daily data
-		System.out.println("=== Daily Stock Data ===");
-		converter.printStockData(stockDataMap);
-
-		// Convert to weekly data and print
-		Map<String, List<StockData>> stockDataWeeklyMap = converter.convertToWeeklyData(stockDataMap);
-		System.out.println("=== Weekly Stock Data ===");
-		converter.printWeeklyStockData(stockDataWeeklyMap);
-	}
 }

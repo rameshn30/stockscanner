@@ -28,6 +28,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.opencsv.bean.CsvToBean;
 import com.opencsv.bean.CsvToBeanBuilder;
@@ -35,6 +36,7 @@ import com.ramgenix.scanner.entity.BBValues;
 import com.ramgenix.scanner.entity.FinancialInstrument;
 import com.ramgenix.scanner.entity.Pattern;
 import com.ramgenix.scanner.entity.SectorAnalysisResult;
+import com.ramgenix.scanner.entity.Stock;
 import com.ramgenix.scanner.entity.StockData;
 import com.ramgenix.scanner.entity.StockDataInfo;
 import com.ramgenix.scanner.entity.StockMaster;
@@ -44,6 +46,7 @@ import com.ramgenix.scanner.utility.StockCalculationUtility;
 import com.ramgenix.scanner.utility.StockDataConverter;
 
 import io.micrometer.common.util.StringUtils;
+import jakarta.annotation.PostConstruct;
 
 @Service
 public class DataInjestionServiceNSEImpl {
@@ -122,6 +125,25 @@ public class DataInjestionServiceNSEImpl {
 	Set<String> inputWatchList = new HashSet<>();
 	String watchlist = "";
 
+	@PostConstruct
+	@Transactional
+	public void initMethod() {
+		Market market = Market.NSE;
+		stockDataMap.clear();
+		stockDataMap = prepareDataForProcessing(market, false);
+
+		stockDataMap.forEach((symbol, stockDataList) -> {
+			for (int i = 0; i < stockDataList.size(); i++) {
+				bbValues = calculateBBAndMaValues(symbol, stockDataList, i);
+				stockDataList.get(i).setMa10(bbValues.getMa_10());
+				stockDataList.get(i).setMa20(bbValues.getMa_20());
+				stockDataList.get(i).setMa50(bbValues.getMa_50());
+			}
+		});
+
+		System.out.println("INIT DONE");
+	}
+
 	public String processLatestData(Market market, String timeframe, String watchlist) {
 		this.watchlist = watchlist;
 		MarketConfig config = marketConfigs.get(market);
@@ -149,13 +171,13 @@ public class DataInjestionServiceNSEImpl {
 
 	private String processLatestData(Market market, String timeframe) {
 		stockDataMap.clear();
-		stockDataMap = prepareDataForProcessing(market);
+		stockDataMap = prepareDataForProcessing(market, true);
 
 		// performSectorAnalysis(stockDataMap);
 
-		Map<String, List<StockData>> weeklyStockDataMap = stockDataConverter.convertToWeeklyData(stockDataMap);
-		// stockDataConverter.printStockData(stockDataMap);
-		// stockDataConverter.printWeeklyStockData(weeklyStockDataMap);
+		Map<String, List<StockData>> weeklyStockDataMap = null;
+		if ("Weekly".equalsIgnoreCase(timeframe))
+			weeklyStockDataMap = stockDataConverter.convertToWeeklyData(stockDataMap);
 
 		// Select the appropriate map based on timeframe
 		Map<String, List<StockData>> dataMapToProcess;
@@ -299,7 +321,7 @@ public class DataInjestionServiceNSEImpl {
 			// Sort and save full pattern file
 			patterns.sort(new RankComparator());
 			if (patterns.size() > 150) {
-				patterns.subList(150, patterns.size()).clear();
+				// patterns.subList(150, patterns.size()).clear();
 			}
 			savePatternsToFile(market, dates.get(0), patterns, fileName, false, false);
 
@@ -392,7 +414,7 @@ public class DataInjestionServiceNSEImpl {
 		return !isETFStock(stockDataList.get(0).getSymbol());
 	}
 
-	private Map<String, List<StockData>> prepareDataForProcessing(Market market) {
+	private Map<String, List<StockData>> prepareDataForProcessing(Market market, boolean shouldDelete) {
 		patternResults.clear();
 		dates.clear();
 		bbValues = null;
@@ -442,7 +464,8 @@ public class DataInjestionServiceNSEImpl {
 		// Set processingDate for the first valid date
 		try {
 			processingDate = LocalDate.parse(dates.get(0), outputFormatter);
-			patternRepository.deleteByDate(processingDate);
+			if (shouldDelete)
+				patternRepository.deleteByDate(processingDate);
 		} catch (DateTimeParseException e) {
 			LOG.error("Failed to parse processing date '{}': {}", dates.get(0), e.getMessage());
 			return stockDataMap;
@@ -2168,7 +2191,7 @@ public class DataInjestionServiceNSEImpl {
 		double bodyAvg20 = 0;
 
 		// Calculate 10-day MA
-		for (int i = startIndex; i < 10; i++) {
+		for (int i = startIndex; i < startIndex + 10; i++) {
 
 			ma_10 += stockDataList.get(i).getClose();
 			bodyAvg10 += Math.abs(stockDataList.get(i).getClose() - stockDataList.get(i).getOpen());
@@ -2176,7 +2199,7 @@ public class DataInjestionServiceNSEImpl {
 		bbValues.setMa_10(ma_10 / 10);
 
 		// Calculate 20-day MA
-		for (int i = startIndex; i < n; i++) {
+		for (int i = startIndex; i < startIndex + 20; i++) {
 
 			ma_20 += stockDataList.get(i).getClose();
 			bodyAvg20 += Math.abs(stockDataList.get(i).getClose() - stockDataList.get(i).getOpen());
@@ -2186,7 +2209,7 @@ public class DataInjestionServiceNSEImpl {
 
 		if (stockDataList.size() > 50 + startIndex) {
 			// Calculate 50-day MA
-			for (int i = startIndex; i < 50 + startIndex; i++) {
+			for (int i = startIndex; i < startIndex + 50; i++) {
 				ma_50 += stockDataList.get(i).getClose();
 			}
 			bbValues.setMa_50(ma_50 / 50);
@@ -2202,9 +2225,9 @@ public class DataInjestionServiceNSEImpl {
 			bbValues.setTwentyMaAverage(twentyMaAverage);
 		}
 
-		if (stockDataList.size() > 200 + startIndex) {
+		if (stockDataList.size() > 200 + startIndex + 1) {
 			// Calculate 50-day MA
-			for (int i = startIndex; i < 200 + startIndex; i++) {
+			for (int i = startIndex; i < startIndex + 200; i++) {
 				ma_200 += stockDataList.get(i).getClose();
 			}
 			bbValues.setMa_200(ma_200 / 200);
@@ -2237,7 +2260,7 @@ public class DataInjestionServiceNSEImpl {
 			return;
 		}
 
-		Map<String, List<StockData>> stockDataMap = prepareDataForProcessing(market);
+		Map<String, List<StockData>> stockDataMap = prepareDataForProcessing(market, true);
 		stockDataMap.forEach((symbol, stockDataList) -> {
 			processForSymbol(market, stockDataMap, symbol, 51);
 		});
@@ -2384,6 +2407,32 @@ public class DataInjestionServiceNSEImpl {
 			System.out.println("Sector: " + result.getSector() + ", Average Percentage Change: "
 					+ result.getAveragePercentageChange());
 		}
+	}
+
+	public List<Stock> getStocksByPattern(String pattern) {
+
+		Market market = Market.NSE;
+
+		/*
+		 * if (stockDataMap.isEmpty()) { stockDataMap.clear(); stockDataMap =
+		 * prepareDataForProcessing(market,false); }
+		 */
+
+		List<Stock> stocks = new ArrayList<>();
+		List<StockData> sd = stockDataMap.get("BEML");
+		Stock stock = new Stock();
+		stock.setSymbol(sd.get(0).getSymbol());
+		stock.setExchange("NSE");
+		stock.setPattern("bull-flags");
+		stock.setInsideBar(true);
+		stock.setAdr(3.5);
+		stock.setDistance10MA(0.5);
+
+		stock.setHistory(sd);
+		stocks.add(stock);
+
+		return stocks;
+
 	}
 
 }
