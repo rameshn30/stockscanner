@@ -744,6 +744,11 @@ public class DataInjestionServiceNSEImpl {
 	}
 
 	private boolean findNearSupportStocks(String symbol, List<StockData> stockDataList) {
+
+		if (!symbol.equals("ARVINDFASN")) {
+			// return false;
+		}
+
 		if (stockDataList == null || stockDataList.isEmpty() || !volumeCheck(stockDataList)
 				|| !priceCheck(stockDataList)) {
 			return false;
@@ -759,7 +764,10 @@ public class DataInjestionServiceNSEImpl {
 			return false;
 		}
 
-		double latestClose = stockDataList.get(0).getClose();
+		double close0 = stockDataList.get(0).getClose(); // today
+		double close1 = stockDataList.get(1).getClose(); // yesterday
+		double latestClose = Math.max(close0, close1);
+
 		if (latestClose == 0.0) {
 			return false;
 		}
@@ -768,7 +776,7 @@ public class DataInjestionServiceNSEImpl {
 		double percentageDiff = Double.MAX_VALUE;
 		LocalDate supportDate = null;
 
-		for (int i = 10; i < stockDataList.size(); i++) {
+		for (int i = 5; i < stockDataList.size(); i++) {
 			StockData stockData = stockDataList.get(i);
 			if ("L".equals(stockData.getSwingType())) {
 				double lowPrice = stockData.getLow();
@@ -993,6 +1001,26 @@ public class DataInjestionServiceNSEImpl {
 													actualRetracementPercent);
 
 											double adr = calculateADR(stockDataList, 20);
+											int rank = 0;
+											if (adr > 5) {
+												rank++;
+												rankStr += " ADR >5 ";
+											}
+
+											if (sd.low_0 < bbValues.getMa_10() && sd.high_0 > bbValues.getMa_10()) {
+												rank++;
+												rankStr += " 10 MA bounce";
+											} else if (sd.low_0 < bbValues.getMa_20()
+													&& sd.high_0 > bbValues.getMa_20()) {
+												rank++;
+												rankStr += " 20 MA bounce";
+											}
+
+											if (sd.tail_0 >= (1 * sd.body_0) && sd.low_0 <= sd.low_1) {
+												rank++;
+												rankStr += " BottomTail ";
+											}
+
 											rankStr += " ADR:" + adr;
 											pattern.setRankStr(rankStr);
 											pattern.setRank(adr);
@@ -1561,7 +1589,8 @@ public class DataInjestionServiceNSEImpl {
 		if (!volumeCheck(stockDataList) || !priceCheck(stockDataList))
 			return false;
 
-		if (sd.close_0 > sd.open_0) {
+		if (sd.close_0 > sd.open_0 && ((sd.close_0 - sd.close_1) / sd.close_1) * 100 >= 4.5) {
+
 			Pattern pattern = Pattern.builder().patternName(type).stockData(stockDataList.get(0)).head(sd.head_0)
 					.tail(sd.tail_0).body0(sd.body_0).country(config.country).build();
 			pattern.setRank(sd.close_0 - sd.close_1);
