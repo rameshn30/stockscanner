@@ -121,25 +121,30 @@ public class DataInjestionServiceNSEImpl {
 	Map<String, List<Pattern>> patternResults = new ConcurrentHashMap<>();
 	Set<String> patternResultsSet = new HashSet<>();
 	String outputFilePath = "C:\\Users\\USER\\OneDrive - RamGenix\\ASX\\newhtml\\";
-	private String stockchartsurl = "p=D&yr=0&mn=6&dy=0&i=t3140059700c&r=1752588189290";
+	private String stockchartsurl = "p=D&yr=0&mn=6&dy=0&i=t0917530288c&r=1752757486211";
 	Set<String> inputWatchList = new HashSet<>();
 	String watchlist = "";
 
 	@PostConstruct
 	@Transactional
 	public void initMethod() {
-		Market market = Market.NSE;
-		stockDataMap.clear();
-		stockDataMap = prepareDataForProcessing(market, false);
-
-		stockDataMap.forEach((symbol, stockDataList) -> {
-			for (int i = 0; i < stockDataList.size(); i++) {
-				bbValues = calculateBBAndMaValues(symbol, stockDataList, i);
-				stockDataList.get(i).setMa10(bbValues.getMa_10());
-				stockDataList.get(i).setMa20(bbValues.getMa_20());
-				stockDataList.get(i).setMa50(bbValues.getMa_50());
-			}
-		});
+		/*
+		 * Market market = Market.NSE; stockDataMap.clear(); stockDataMap =
+		 * prepareDataForProcessing(market, false);
+		 * 
+		 * stockDataMap.entrySet().stream().sorted((e1, e2) -> { double adr1 =
+		 * calculateADR(e1.getValue(), 20); double adr2 = calculateADR(e2.getValue(),
+		 * 20); return Double.compare(adr2, adr1); // descending }).forEach(entry -> {
+		 * 
+		 * String symbol = entry.getKey(); List<StockData> stockDataList =
+		 * entry.getValue(); markSwingHighsAndLows(symbol, stockDataList);
+		 * 
+		 * for (int i = 0; i < stockDataList.size(); i++) { bbValues =
+		 * calculateBBAndMaValues(symbol, stockDataList, i);
+		 * stockDataList.get(i).setMa10(bbValues.getMa_10());
+		 * stockDataList.get(i).setMa20(bbValues.getMa_20());
+		 * stockDataList.get(i).setMa50(bbValues.getMa_50()); } });
+		 */
 
 		System.out.println("INIT DONE");
 	}
@@ -238,38 +243,28 @@ public class DataInjestionServiceNSEImpl {
 
 		// Constants for bull flag detection parameters
 		double BULL_FLAG_FLAGPOLE_BURST_THRESHOLD = 1.19; // Minimum price increase for swing high // (19%)
-		double BULL_FLAG_CONSOLIDATION_LOWER_THRESHOLD = 0.80; // Lower boundary for consolidation range (90% of swing
-																// // high)
-		double BULL_FLAG_CONSOLIDATION_UPPER_THRESHOLD = 1.10; // Upper boundary for consolidation range (110% of swing
-																// // high)
+
 		int BULL_FLAG_FLAGPOLE_HIGH_MIN_DISTANCE_FROM_CURRENT = 4; // Minimum bars between flagpole and current data
 
 		int minimumFlagPoleBars = 5;
 		int maximumFlagPoleBars = 30;
 
 		if (market == Market.US) {
-			BULL_FLAG_FLAGPOLE_BURST_THRESHOLD = 1.10;
-			// (10%)
-			BULL_FLAG_CONSOLIDATION_LOWER_THRESHOLD = 0.90;
-			// range (90% of swing high)
-			BULL_FLAG_CONSOLIDATION_UPPER_THRESHOLD = 1.10;
-			// range (110% of swing high)
+			BULL_FLAG_FLAGPOLE_BURST_THRESHOLD = 1.15;
+			// (15%)
+
 			BULL_FLAG_FLAGPOLE_HIGH_MIN_DISTANCE_FROM_CURRENT = 4;
-			minimumFlagPoleBars = 3;
-			maximumFlagPoleBars = 10;
+			minimumFlagPoleBars = 5;
+			maximumFlagPoleBars = 20;
 
 		}
 
 		if (market == Market.NSE) {
-			BULL_FLAG_FLAGPOLE_BURST_THRESHOLD = 1.08;
-			// (10%)
-			BULL_FLAG_CONSOLIDATION_LOWER_THRESHOLD = 0.90;
-			// range (90% of swing high)
-			BULL_FLAG_CONSOLIDATION_UPPER_THRESHOLD = 1.10;
-			// range (110% of swing high)
+			BULL_FLAG_FLAGPOLE_BURST_THRESHOLD = 1.15;
+			// (15%)
 			BULL_FLAG_FLAGPOLE_HIGH_MIN_DISTANCE_FROM_CURRENT = 2;
-			minimumFlagPoleBars = 2;
-			maximumFlagPoleBars = 10;
+			minimumFlagPoleBars = 5;
+			maximumFlagPoleBars = 30;
 
 		}
 
@@ -278,7 +273,6 @@ public class DataInjestionServiceNSEImpl {
 		}
 
 		findBullFlagStocksAdvanced(market, symbol, timeframe, stockDataList, BULL_FLAG_FLAGPOLE_BURST_THRESHOLD,
-				BULL_FLAG_CONSOLIDATION_LOWER_THRESHOLD, BULL_FLAG_CONSOLIDATION_UPPER_THRESHOLD,
 				BULL_FLAG_FLAGPOLE_HIGH_MIN_DISTANCE_FROM_CURRENT, minimumFlagPoleBars, maximumFlagPoleBars,
 				"BULL_FLAG");
 
@@ -320,9 +314,7 @@ public class DataInjestionServiceNSEImpl {
 		if (patterns != null && !patterns.isEmpty()) {
 			// Sort and save full pattern file
 			patterns.sort(new RankComparator());
-			if (patterns.size() > 150) {
-				// patterns.subList(150, patterns.size()).clear();
-			}
+
 			savePatternsToFile(market, dates.get(0), patterns, fileName, false, false);
 
 			if (!"Weekly".equalsIgnoreCase(timeframe)) {
@@ -677,7 +669,7 @@ public class DataInjestionServiceNSEImpl {
 		if (config == null)
 			return false;
 
-		if (sd.tail_0 >= (1 * sd.body_0) && sd.low_0 <= sd.low_1 && (sd.head_0 == 0 || (sd.tail_0 / sd.head_0) > 2)) {
+		if (sd.tail_0 >= (1 * sd.body_0) && sd.low_0 <= sd.low_1 && (sd.head_0 == 0 || (sd.tail_0 / sd.head_0) > 1.5)) {
 
 			Pattern pattern = Pattern.builder().bbValues(bbValues).patternName(type).stockData(stockDataList.get(0))
 					.head(sd.head_0).tail(sd.tail_0).body0(sd.body_0).country(config.country).build();
@@ -1027,12 +1019,11 @@ public class DataInjestionServiceNSEImpl {
 	}
 
 	private boolean findBullFlagStocksAdvanced(Market market, String symbol, String timeframe,
-			List<StockData> stockDataList, double flagpoleThreshold, double consolidationLowerThreshold,
-			double consolidationUpperThreshold, int minimumSwingHighIndex, int minimumFlagPoleBars,
+			List<StockData> stockDataList, double flagpoleThreshold, int minimumSwingHighIndex, int minimumFlagPoleBars,
 			int maximumFlagPoleBars, String patternType) {
 
 		// Optional filter for testing specific stock, currently disabled
-		if (!symbol.equals("GALLANTT")) {
+		if (!symbol.equals("USHAMART")) {
 			// return false;
 		}
 
@@ -1236,7 +1227,7 @@ public class DataInjestionServiceNSEImpl {
 
 			// Create Pattern object with static metrics from StockDataInfo
 			Pattern pattern = Pattern.builder().patternName(patternType).stockData(stockDataList.get(0)).head(sd.head_0)
-					.tail(sd.tail_0).body0(sd.body_0).build();
+					.tail(sd.tail_0).body0(sd.body_0).symbol(symbol).build();
 
 			// Calculate metrics for rank string
 			double flagpoleSizePercent = ((flagPoleHighPrice - flagPoleLowPrice) / flagPoleLowPrice) * 100;
@@ -1264,7 +1255,6 @@ public class DataInjestionServiceNSEImpl {
 
 			if (swingHighIndex <= 10) {
 				rank++;
-				;
 				rankStr += " Recent Swing High";
 			}
 
@@ -2433,6 +2423,63 @@ public class DataInjestionServiceNSEImpl {
 
 		return stocks;
 
+	}
+
+	public List<Stock> findStocksByPatternAndCriteria(String patternName, Double adr, Double minPrice, Double maxPrice,
+			Long minVolume) {
+		Market market = Market.NSE;
+		String timeframe = "Daily";
+
+		double BULL_FLAG_FLAGPOLE_BURST_THRESHOLD = 1.19; // Minimum price increase for swing high // (19%)
+		int BULL_FLAG_FLAGPOLE_HIGH_MIN_DISTANCE_FROM_CURRENT = 4; // Minimum bars between flagpole and current data
+
+		int minimumFlagPoleBars = 5;
+		int maximumFlagPoleBars = 30;
+
+		if (market == Market.NSE) {
+			BULL_FLAG_FLAGPOLE_BURST_THRESHOLD = 1.15;
+			// (15%)
+			BULL_FLAG_FLAGPOLE_HIGH_MIN_DISTANCE_FROM_CURRENT = 2;
+			minimumFlagPoleBars = 2;
+			maximumFlagPoleBars = 10;
+
+			patternResults.clear();
+
+			for (Map.Entry<String, List<StockData>> entry : stockDataMap.entrySet()) {
+				String symbol = entry.getKey();
+				List<StockData> stockDataList = entry.getValue();
+
+				findBullFlagStocksAdvanced(market, symbol, timeframe, stockDataList, BULL_FLAG_FLAGPOLE_BURST_THRESHOLD,
+						BULL_FLAG_FLAGPOLE_HIGH_MIN_DISTANCE_FROM_CURRENT, minimumFlagPoleBars, maximumFlagPoleBars,
+						"BULL_FLAG");
+			}
+
+		}
+
+		List<Stock> stocks = new ArrayList<>();
+		List<Pattern> results = patternResults.get("BULL_FLAG");
+		if (results.size() > 30) {
+			results.subList(30, results.size()).clear();
+		}
+		for (Pattern pattern : results) {
+
+			List<StockData> sd = stockDataMap.get(pattern.getSymbol());
+			if (sd.size() > 50)
+				sd.subList(50, sd.size()).clear();
+
+			Stock stock = new Stock();
+			stock.setSymbol(pattern.getSymbol());
+			stock.setExchange("NSE");
+			stock.setPattern(patternName);
+			stock.setInsideBar(true);
+			stock.setAdr(3.5);
+			stock.setDistance10MA(0.5);
+
+			stock.setHistory(sd);
+			stocks.add(stock);
+		}
+
+		return stocks;
 	}
 
 }
