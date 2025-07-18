@@ -121,7 +121,7 @@ public class DataInjestionServiceNSEImpl {
 	Map<String, List<Pattern>> patternResults = new ConcurrentHashMap<>();
 	Set<String> patternResultsSet = new HashSet<>();
 	String outputFilePath = "C:\\Users\\USER\\OneDrive - RamGenix\\ASX\\newhtml\\";
-	private String stockchartsurl = "p=D&yr=0&mn=6&dy=0&i=t0917530288c&r=1752757486211";
+	private String stockchartsurl = "p=D&yr=0&mn=6&dy=0&i=t9037583302c&r=1752829607280";
 	Set<String> inputWatchList = new HashSet<>();
 	String watchlist = "";
 
@@ -651,8 +651,25 @@ public class DataInjestionServiceNSEImpl {
 					.head(sd.head_0).tail(sd.tail_0).body0(sd.body_0).country(config.country).build();
 
 			double adr = calculateADR(stockDataList, 20);
-			pattern.setRank(adr);
-			pattern.setRankStr("ADR:" + adr);
+			int rank = 0;
+			String rankStr = "";
+
+			if (adr > 5) {
+				rank++;
+				rankStr += " ADR >5 ";
+			}
+
+			if (sd.low_0 < bbValues.getMa_10() && sd.high_0 > bbValues.getMa_10()) {
+				rank++;
+				rankStr += " 10 MA bounce";
+			} else if (sd.low_0 < bbValues.getMa_20() && sd.high_0 > bbValues.getMa_20()) {
+				rank++;
+				rankStr += " 20 MA bounce";
+			}
+			rankStr += " ADR:" + adr;
+
+			pattern.setRank(rank);
+			pattern.setRankStr(rankStr);
 			patternResults.computeIfAbsent(type, k -> new ArrayList<>()).add(pattern);
 
 			savePattern(pattern, type, sd);
