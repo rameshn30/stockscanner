@@ -53,7 +53,7 @@ public class DataInjestionServiceNSEImpl {
 
 	private static final Logger LOG = LoggerFactory.getLogger(DataInjestionServiceNSEImpl.class);
 	private static final String BASE_DIR = "C:\\Users\\USER\\OneDrive - RamGenix\\ASX\\";
-	private static final double MIN_POST_BREAKOUT_MOVE_PERCENT = 7.0;
+	private static final double MIN_POST_BREAKOUT_MOVE_PERCENT = 5.0;
 	private static final double RETRACEMENT_TOLERANCE_PERCENT = 5.0; // +/- tolerance around the target
 	private static final int BREAKOUT_DAYS_WINDOW = 50;
 	private static final int SH_CANDIDATE_20_DAY_LOOKBACK = 20;
@@ -817,7 +817,7 @@ public class DataInjestionServiceNSEImpl {
 
 		final String patternType = "BreakoutBars";
 
-		if (!symbol.equals("SPMLINFRA")) {
+		if (!symbol.equals("MGL")) {
 			// return false;
 		}
 
@@ -880,7 +880,7 @@ public class DataInjestionServiceNSEImpl {
 					if (breakoutCandleIndex != -1) {
 						boolean moved10PercentUp = false;
 						for (int k = breakoutCandleIndex; k >= 0; k--) {
-							if (stockDataList.get(k).getClose() >= originalSwingHighPrice
+							if (stockDataList.get(k).getHigh() >= originalSwingHighPrice
 									* (1 + MIN_POST_BREAKOUT_MOVE_PERCENT / 100)) {
 								moved10PercentUp = true;
 								break;
@@ -902,15 +902,21 @@ public class DataInjestionServiceNSEImpl {
 								boolean isValidBreakoutPath = true;
 								// Get the close price of the breakout candle for comparison.
 								double breakoutClosePrice = stockDataList.get(breakoutCandleIndex).getClose();
+								double breakoutLowPrice = stockDataList.get(breakoutCandleIndex).getLow();
 
 								// Iterate from the breakout candle's index down to the
 								// highestPostBreakoutHighIndex.
 								// This covers all candles in the path from breakout to the highest point
 								// achieved.
 								for (int pathCheckIndex = breakoutCandleIndex; pathCheckIndex >= highestPostBreakoutSwingHighIndex; pathCheckIndex--) {
-									// If any candle in this path closed below the breakout candle's close, it's
-									// invalid.
-									if (stockDataList.get(pathCheckIndex).getClose() < breakoutClosePrice) {
+									// If any candle in this path closed below the breakout candle's close(changed
+									// it to low since not every
+									// candle can keepgoing high, if any close below low, it's invalid.
+									if (stockDataList.get(pathCheckIndex).getClose() < breakoutLowPrice) { // changed to
+																											// breakoutLowPrice
+																											// instead
+																											// of
+																											// breakoutClosePrice
 										isValidBreakoutPath = false;
 										break; // Found an invalid close, no need to check further.
 									}
@@ -969,8 +975,10 @@ public class DataInjestionServiceNSEImpl {
 																						// highestPostBreakoutSwingHigh
 													actualRetracementPercent);
 
+											double adr = calculateADR(stockDataList, 20);
+											rankStr += " ADR:" + adr;
 											pattern.setRankStr(rankStr);
-											pattern.setRank(calculateADR(stockDataList, 20));
+											pattern.setRank(adr);
 											patternResults.computeIfAbsent(patternType, k -> new ArrayList<>())
 													.add(pattern);
 											return true;
@@ -1255,7 +1263,15 @@ public class DataInjestionServiceNSEImpl {
 
 			if (swingHighIndex <= 10) {
 				rank++;
-				rankStr += " Recent Swing High";
+				rankStr += " Recent Swing High:" + swingHighIndex;
+			}
+
+			if (sd.low_0 < bbValues.getMa_10() && sd.high_0 > bbValues.getMa_10()) {
+				rank++;
+				rankStr += " 10 MA bounce";
+			} else if (sd.low_0 < bbValues.getMa_20() && sd.high_0 > bbValues.getMa_20()) {
+				rank++;
+				rankStr += " 20 MA bounce";
 			}
 
 			pattern.setRank(rank);
