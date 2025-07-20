@@ -12,6 +12,7 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeFormatterBuilder;
 import java.time.format.DateTimeParseException;
+import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -100,6 +101,7 @@ public class DataInjestionServiceNSEImpl {
 		patternToFileNameMap.put("GreenRed", "GreenRed");
 
 		patternToFileNameMap.put("UpDay", "UpDay");
+		patternToFileNameMap.put("DownDay", "DownDay");
 
 		this.marketConfigs = new HashMap<>();
 		marketConfigs.put(Market.NSE,
@@ -121,7 +123,7 @@ public class DataInjestionServiceNSEImpl {
 	Map<String, List<Pattern>> patternResults = new ConcurrentHashMap<>();
 	Set<String> patternResultsSet = new HashSet<>();
 	String outputFilePath = "C:\\Users\\USER\\OneDrive - RamGenix\\ASX\\newhtml\\";
-	private String stockchartsurl = "p=D&yr=0&mn=6&dy=0&i=t9037583302c&r=1752829607280";
+	private String stockchartsurl = "p=W&yr=2&mn=0&dy=0&i=t7931272857c&r=1752991772405";
 	Set<String> inputWatchList = new HashSet<>();
 	String watchlist = "";
 
@@ -216,6 +218,7 @@ public class DataInjestionServiceNSEImpl {
 
 					}
 					upday(symbol, stockDataList);
+					downDay(symbol, stockDataList);
 				}
 
 			}
@@ -226,6 +229,7 @@ public class DataInjestionServiceNSEImpl {
 		}
 
 		getRestingStocksAfterBurst(market);
+		// generateMarketBreadthTable(market); // Added market breadth table generation
 
 		// Process all pattern types
 		patternToFileNameMap.forEach((patternName, fileName) -> saveSortedPatterns(market, timeframe, patternName,
@@ -745,7 +749,7 @@ public class DataInjestionServiceNSEImpl {
 
 	private boolean findNearSupportStocks(String symbol, List<StockData> stockDataList) {
 
-		if (!symbol.equals("ARVINDFASN")) {
+		if (!symbol.equals("MAZDOCK")) {
 			// return false;
 		}
 
@@ -754,7 +758,7 @@ public class DataInjestionServiceNSEImpl {
 			return false;
 		}
 		String type = "NearSupport";
-		double proximityThreshold = 2.0;
+		double proximityThreshold = 3;
 		StockDataInfo sd = new StockDataInfo(stockDataList);
 		MarketConfig config = marketConfigs.get(Market.NSE); // Default to NSE, adjust if needed
 		if (config == null)
@@ -775,18 +779,22 @@ public class DataInjestionServiceNSEImpl {
 		double supportLevel = 0.0;
 		double percentageDiff = Double.MAX_VALUE;
 		LocalDate supportDate = null;
+		int supportLevelIndex = -1;
 
 		for (int i = 5; i < stockDataList.size(); i++) {
 			StockData stockData = stockDataList.get(i);
 			if ("L".equals(stockData.getSwingType())) {
 				double lowPrice = stockData.getLow();
-				if (lowPrice < latestClose) {
-					percentageDiff = ((latestClose - lowPrice) / lowPrice) * 100;
+				if (lowPrice < close0 && lowPrice < close1) {
+					percentageDiff = ((close0 - lowPrice) / lowPrice) * 100;
 					if (percentageDiff > proximityThreshold) {
-						continue; // Skip if initial check fails, move to next support
+						percentageDiff = ((close1 - lowPrice) / lowPrice) * 100;
+						if (percentageDiff > proximityThreshold)
+							continue; // Skip if initial check fails, move to next support
 					}
 					supportLevel = lowPrice;
 					supportDate = stockData.getDate();
+					supportLevelIndex = i;
 
 					// New inner loop to check all bars from i to 0
 					boolean validRange = true;
@@ -815,7 +823,7 @@ public class DataInjestionServiceNSEImpl {
 				+ (supportDate != null ? supportDate.toString() : "N/A") + " LatestClose:"
 				+ String.format("%.2f", latestClose);
 		pattern.setRankStr(rankStr);
-		pattern.setRank(percentageDiff * -1);
+		pattern.setRank(supportLevelIndex);
 		patternResults.computeIfAbsent(type, k -> new ArrayList<>()).add(pattern);
 		return true;
 	}
@@ -842,7 +850,7 @@ public class DataInjestionServiceNSEImpl {
 
 		final String patternType = "BreakoutBars";
 
-		if (!symbol.equals("MGL")) {
+		if (!symbol.equals("MAZDOCK")) {
 			// return false;
 		}
 
@@ -1586,8 +1594,9 @@ public class DataInjestionServiceNSEImpl {
 		if (config == null)
 			return false;
 
-		if (!volumeCheck(stockDataList) || !priceCheck(stockDataList))
-			return false;
+		if (!volumeCheck(stockDataList) || !priceCheck(stockDataList)) {
+			// return false;
+		}
 
 		if (sd.close_0 > sd.open_0 && ((sd.close_0 - sd.close_1) / sd.close_1) * 100 >= 4.5) {
 
@@ -1609,9 +1618,15 @@ public class DataInjestionServiceNSEImpl {
 		if (config == null)
 			return false;
 
-		if (sd.close_0 < sd.open_0) {
+		if (!volumeCheck(stockDataList) || !priceCheck(stockDataList)) {
+			// return false;
+		}
+
+		// Must be a red candle and down more than 4.5% from yesterday’s close
+		if (sd.close_0 < sd.open_0 && ((sd.close_1 - sd.close_0) / sd.close_1) * 100 >= 4.5) {
 			Pattern pattern = Pattern.builder().patternName(type).stockData(stockDataList.get(0)).head(sd.head_0)
 					.tail(sd.tail_0).body0(sd.body_0).country(config.country).build();
+			pattern.setRank(sd.close_1 - sd.close_0);
 			patternResults.computeIfAbsent(type, k -> new ArrayList<>()).add(pattern);
 			return true;
 		}
@@ -1832,26 +1847,36 @@ public class DataInjestionServiceNSEImpl {
 	}
 
 	private void markSwingHighsAndLows(String symbol, List<StockData> stockDataList) {
-		if (stockDataList.size() < 3) {
-			// Cannot mark swings if there are less than 3 data points
-			return;
-		}
+		int range = 3; // number of candles before/after to consider
+		int minGap = 3; // minimum bar gap between two swing points
 
-		for (int i = 1; i < stockDataList.size() - 1; i++) {
+		int lastSwingIndex = -minGap; // track index of last swing marked
+
+		for (int i = range; i < stockDataList.size() - range; i++) {
 			StockData current = stockDataList.get(i);
-			StockData prev = stockDataList.get(i - 1);
-			StockData next = stockDataList.get(i + 1);
 
-			if (current.getHigh() > prev.getHigh() && current.getHigh() > next.getHigh()) {
-				// Current price is higher than the previous and next prices, marking as swing
-				// high
+			boolean isSwingHigh = true;
+			boolean isSwingLow = true;
+
+			for (int j = i - range; j <= i + range; j++) {
+				if (j == i)
+					continue;
+				if (stockDataList.get(j).getHigh() >= current.getHigh()) {
+					isSwingHigh = false;
+				}
+				if (stockDataList.get(j).getLow() <= current.getLow()) {
+					isSwingLow = false;
+				}
+			}
+
+			// Ensure spacing from previous swing
+			if (isSwingHigh /* && i - lastSwingIndex >= minGap */) {
 				current.setSwingType("H");
-			} else if (current.getLow() < prev.getLow() && current.getLow() < next.getLow()) {
-				// Current price is lower than the previous and next prices, marking as swing
-				// low
+				lastSwingIndex = i;
+			} else if (isSwingLow /* && i - lastSwingIndex >= minGap */) {
 				current.setSwingType("L");
+				lastSwingIndex = i;
 			} else {
-				// Not a swing high or swing low
 				current.setSwingType("");
 			}
 		}
@@ -2544,4 +2569,431 @@ public class DataInjestionServiceNSEImpl {
 		return stocks;
 	}
 
+	private void generateMarketBreadthTable(Market market) {
+		MarketConfig config = marketConfigs.get(market);
+		if (config == null) {
+			LOG.error("No configuration found for market: {}", market);
+			return;
+		}
+
+		// Initialize data structure for breadth metrics
+		List<Map<String, Object>> breadthData = new ArrayList<>();
+		int cumulativeADLine = 0; // Cumulative A/D Line
+		Map<String, StockMaster> tickerToStockMaster = stockMasterRepository.findAll().stream()
+				.collect(Collectors.toMap(StockMaster::getTicker, sm -> sm));
+
+		// Process each date
+		for (String dateStr : dates) {
+			Map<String, Object> metrics = new HashMap<>();
+			metrics.put("date", dateStr);
+
+			int up45Count = 0, down45Count = 0;
+			int aboveMA10 = 0, belowMA10 = 0;
+			int aboveMA20 = 0, belowMA20 = 0;
+			int aboveMA50 = 0, belowMA50 = 0;
+			int aboveMA200 = 0, belowMA200 = 0;
+			int advancers = 0, decliners = 0;
+			int newHighs = 0, newLows = 0;
+			long upVolume = 0, downVolume = 0;
+			Map<String, Integer> sectorAdvancers = new HashMap<>();
+			Map<String, Integer> sectorDecliners = new HashMap<>();
+			Map<String, Integer> sectorAboveMA50 = new HashMap<>();
+			Map<String, Integer> sectorTotal = new HashMap<>();
+
+			// Process each stock for the given date
+			for (Map.Entry<String, List<StockData>> entry : stockDataMap.entrySet()) {
+				String symbol = entry.getKey();
+				List<StockData> stockDataList = entry.getValue();
+
+				// Find the StockData for the current date
+				StockData currentData = null;
+				StockData prevData = null;
+				for (int i = 0; i < stockDataList.size(); i++) {
+					if (stockDataList.get(i).getDate().format(DateTimeFormatter.ofPattern("yyyyMMdd"))
+							.equals(dateStr)) {
+						currentData = stockDataList.get(i);
+						if (i + 1 < stockDataList.size()) {
+							prevData = stockDataList.get(i + 1);
+						}
+						break;
+					}
+				}
+
+				if (currentData == null || prevData == null || !volumeCheck(stockDataList)
+						|| !priceCheck(stockDataList)) {
+					continue;
+				}
+
+				// Get sector
+				String subSector = tickerToStockMaster.getOrDefault(symbol, new StockMaster()).getSubSector();
+				if (subSector == null)
+					subSector = "Unknown";
+				sectorTotal.merge(subSector, 1, Integer::sum);
+
+				// Calculate percentage change
+				double close0 = currentData.getClose();
+				double close1 = prevData.getClose();
+				double changePct = ((close0 - close1) / close1) * 100;
+
+				// Stocks up/down by 4.5%
+				if (changePct >= 4.5) {
+					up45Count++;
+					advancers++;
+					upVolume += currentData.getVolume();
+					sectorAdvancers.merge(subSector, 1, Integer::sum);
+				} else if (changePct <= -4.5) {
+					down45Count++;
+					decliners++;
+					downVolume += currentData.getVolume();
+					sectorDecliners.merge(subSector, 1, Integer::sum);
+				} else if (close0 > close1) {
+					advancers++;
+					upVolume += currentData.getVolume();
+					sectorAdvancers.merge(subSector, 1, Integer::sum);
+				} else if (close0 < close1) {
+					decliners++;
+					downVolume += currentData.getVolume();
+					sectorDecliners.merge(subSector, 1, Integer::sum);
+				}
+
+				// Moving averages
+				BBValues bb = calculateBBAndMaValues(symbol, stockDataList, stockDataList.indexOf(currentData));
+				if (bb != null) {
+					if (close0 > bb.getMa_10())
+						aboveMA10++;
+					else
+						belowMA10++;
+					if (close0 > bb.getMa_20())
+						aboveMA20++;
+					else
+						belowMA20++;
+					if (close0 > bb.getMa_50()) {
+						aboveMA50++;
+						sectorAboveMA50.merge(subSector, 1, Integer::sum);
+					} else {
+						belowMA50++;
+					}
+					if (close0 > bb.getMa_200())
+						aboveMA200++;
+					else
+						belowMA200++;
+				}
+
+				// New 52-week highs/lows
+				if (stockDataList.size() >= 252) {
+					boolean isNewHigh = true, isNewLow = true;
+					double currentHigh = currentData.getHigh();
+					double currentLow = currentData.getLow();
+					for (int i = 1; i < 252 && i < stockDataList.size(); i++) {
+						StockData pastData = stockDataList.get(i);
+						if (pastData.getHigh() >= currentHigh)
+							isNewHigh = false;
+						if (pastData.getLow() <= currentLow)
+							isNewLow = false;
+					}
+					if (isNewHigh)
+						newHighs++;
+					if (isNewLow)
+						newLows++;
+				}
+			}
+
+			// Calculate breadth metrics
+			int netAD = advancers - decliners;
+			cumulativeADLine += netAD;
+			double adRatio = decliners > 0 ? (double) advancers / decliners
+					: (advancers > 0 ? Double.POSITIVE_INFINITY : 0.0);
+			double volumeRatio = downVolume > 0 ? (double) upVolume / downVolume
+					: (upVolume > 0 ? Double.POSITIVE_INFINITY : 0.0);
+			double trin = (decliners > 0 && upVolume > 0) ? (adRatio / volumeRatio)
+					: (advancers > 0 ? 0.0 : Double.POSITIVE_INFINITY);
+
+			// Calculate MA percentages
+			int totalStocks = aboveMA10 + belowMA10;
+			double pctAboveMA10 = totalStocks > 0 ? (double) aboveMA10 / totalStocks * 100 : 0.0;
+			double pctAboveMA20 = totalStocks > 0 ? (double) aboveMA20 / totalStocks * 100 : 0.0;
+			double pctAboveMA50 = totalStocks > 0 ? (double) aboveMA50 / totalStocks * 100 : 0.0;
+			double pctAboveMA200 = totalStocks > 0 ? (double) aboveMA200 / totalStocks * 100 : 0.0;
+
+			// Trend classification
+			int trendScore = 0;
+			double adLineSlope = calculateADLineSlope(breadthData, cumulativeADLine, 10);
+			if (adLineSlope > 0)
+				trendScore++;
+			if (adRatio > 1.5)
+				trendScore++;
+			if (pctAboveMA50 > 70)
+				trendScore++;
+			if (newHighs > newLows)
+				trendScore++;
+			if (adLineSlope < 0)
+				trendScore--;
+			if (adRatio < 0.7)
+				trendScore--;
+			if (pctAboveMA50 < 30)
+				trendScore--;
+			if (newHighs < newLows)
+				trendScore--;
+			String marketCondition = trendScore >= 3 ? "Bullish" : trendScore <= -3 ? "Bearish" : "Neutral";
+
+			// Overbought/oversold signals
+			String maSignals = "";
+			if (pctAboveMA10 > 80 || pctAboveMA20 > 80)
+				maSignals += "MA Overbought; ";
+			if (pctAboveMA10 < 20 || pctAboveMA20 < 20)
+				maSignals += "MA Oversold; ";
+			if (pctAboveMA50 > 70 || pctAboveMA200 > 70)
+				maSignals += "Long-Term Overbought; ";
+			if (pctAboveMA50 < 30 || pctAboveMA200 < 30)
+				maSignals += "Long-Term Oversold; ";
+			if (trin < 0.5)
+				maSignals += "TRIN Overbought; ";
+			if (trin > 2.0)
+				maSignals += "TRIN Oversold; ";
+			if (adRatio > 2.0)
+				maSignals += "A/D Overbought; ";
+			if (adRatio < 0.5)
+				maSignals += "A/D Oversold; ";
+			if (maSignals.isEmpty())
+				maSignals = "None";
+
+			// Reversal pattern detection
+			String reversalWarning = detectReversalPatterns(breadthData, pctAboveMA10, pctAboveMA20, pctAboveMA50,
+					pctAboveMA200, adRatio, trin, cumulativeADLine, dateStr);
+
+			// Sector breadth
+			StringBuilder sectorSummary = new StringBuilder();
+			List<Map.Entry<String, Double>> sectorADRatios = new ArrayList<>();
+			for (String subSector : sectorTotal.keySet()) {
+				int adv = sectorAdvancers.getOrDefault(subSector, 0);
+				int dec = sectorDecliners.getOrDefault(subSector, 0);
+				double sectorADRatio = dec > 0 ? (double) adv / dec : (adv > 0 ? Double.POSITIVE_INFINITY : 0.0);
+				sectorADRatios.add(new AbstractMap.SimpleEntry<>(subSector, sectorADRatio));
+				double pctAboveMA50Sector = sectorTotal.get(subSector) > 0
+						? (double) sectorAboveMA50.getOrDefault(subSector, 0) / sectorTotal.get(subSector) * 100
+						: 0.0;
+				sectorSummary.append(
+						String.format("%s: A/D=%.2f, %%MA50=%.2f; ", subSector, sectorADRatio, pctAboveMA50Sector));
+			}
+			sectorADRatios.sort((a, b) -> b.getValue().compareTo(a.getValue()));
+			String topSectors = sectorADRatios.size() > 0 ? sectorADRatios.get(0).getKey() : "None";
+			String bottomSectors = sectorADRatios.size() > 0 ? sectorADRatios.get(sectorADRatios.size() - 1).getKey()
+					: "None";
+
+			// Simple forecasting (5-day EMA)
+			double emaADLine = calculateEMA(breadthData, cumulativeADLine, 5, "adLine");
+			double emaPctMA10 = calculateEMA(breadthData, pctAboveMA10, 5, "aboveMA10");
+			String forecast = String.format("A/D Line EMA: %.0f (%s), %%MA10 EMA: %.2f%% (%s)", emaADLine,
+					emaADLine > cumulativeADLine ? "Rising" : "Falling", emaPctMA10,
+					emaPctMA10 > pctAboveMA10 ? "Rising" : "Falling");
+
+			// Store metrics
+			metrics.put("up45", up45Count);
+			metrics.put("down45", down45Count);
+			metrics.put("aboveMA10", aboveMA10);
+			metrics.put("belowMA10", belowMA10);
+			metrics.put("aboveMA20", aboveMA20);
+			metrics.put("belowMA20", belowMA20);
+			metrics.put("aboveMA50", aboveMA50);
+			metrics.put("belowMA50", belowMA50);
+			metrics.put("aboveMA200", aboveMA200);
+			metrics.put("belowMA200", belowMA200);
+			metrics.put("adLine", cumulativeADLine);
+			metrics.put("adRatio", String.format("%.2f", adRatio));
+			metrics.put("newHighs", newHighs);
+			metrics.put("newLows", newLows);
+			metrics.put("upVolume", upVolume);
+			metrics.put("downVolume", downVolume);
+			metrics.put("volumeRatio", String.format("%.2f", volumeRatio));
+			metrics.put("trin", String.format("%.2f", trin));
+			metrics.put("marketCondition", marketCondition);
+			metrics.put("maSignals", maSignals);
+			metrics.put("reversalWarning", reversalWarning);
+			metrics.put("sectorSummary", sectorSummary.toString());
+			metrics.put("topSectors", topSectors);
+			metrics.put("bottomSectors", bottomSectors);
+			metrics.put("forecast", forecast);
+
+			breadthData.add(metrics);
+		}
+
+		// Generate HTML table
+		StringBuilder html = new StringBuilder();
+		html.append("<!DOCTYPE html><html><head>");
+		html.append(
+				"<link href=\"https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css\" rel=\"stylesheet\">");
+		html.append("<title>Market Breadth Report</title></head><body>");
+		html.append("<div class=\"container\"><h2>Market Breadth Report - ").append(config.country).append("</h2>");
+		html.append("<table class=\"table table-striped\"><thead><tr>");
+		html.append("<th>Date</th><th>Up ≥ 4.5%</th><th>Down ≥ 4.5%</th>");
+		html.append("<th>Above MA10</th><th>Below MA10</th><th>Above MA20</th><th>Below MA20</th>");
+		html.append("<th>Above MA50</th><th>Below MA50</th><th>Above MA200</th><th>Below MA200</th>");
+		html.append("<th>A/D Line</th><th>A/D Ratio</th><th>New Highs</th><th>New Lows</th>");
+		html.append("<th>Up Volume</th><th>Down Volume</th><th>Volume Ratio</th><th>TRIN</th>");
+		html.append(
+				"<th>Market Condition</th><th>Signals</th><th>Reversal Warning</th><th>Top Sector</th><th>Bottom Sector</th><th>Forecast</th>");
+		html.append("</tr></thead><tbody>");
+
+		// Sort by date (latest first)
+		breadthData.sort((a, b) -> b.get("date").toString().compareTo(a.get("date").toString()));
+
+		for (Map<String, Object> metrics : breadthData) {
+			html.append("<tr>");
+			html.append("<td>").append(metrics.get("date")).append("</td>");
+			html.append("<td>").append(metrics.get("up45")).append("</td>");
+			html.append("<td>").append(metrics.get("down45")).append("</td>");
+			html.append("<td>").append(metrics.get("aboveMA10")).append("</td>");
+			html.append("<td>").append(metrics.get("belowMA10")).append("</td>");
+			html.append("<td>").append(metrics.get("aboveMA20")).append("</td>");
+			html.append("<td>").append(metrics.get("belowMA20")).append("</td>");
+			html.append("<td>").append(metrics.get("aboveMA50")).append("</td>");
+			html.append("<td>").append(metrics.get("belowMA50")).append("</td>");
+			html.append("<td>").append(metrics.get("aboveMA200")).append("</td>");
+			html.append("<td>").append(metrics.get("belowMA200")).append("</td>");
+			html.append("<td>").append(metrics.get("adLine")).append("</td>");
+			html.append("<td>").append(metrics.get("adRatio")).append("</td>");
+			html.append("<td>").append(metrics.get("newHighs")).append("</td>");
+			html.append("<td>").append(metrics.get("newLows")).append("</td>");
+			html.append("<td>").append(metrics.get("upVolume")).append("</td>");
+			html.append("<td>").append(metrics.get("downVolume")).append("</td>");
+			html.append("<td>").append(metrics.get("volumeRatio")).append("</td>");
+			html.append("<td>").append(metrics.get("trin")).append("</td>");
+			html.append("<td>").append(metrics.get("marketCondition")).append("</td>");
+			html.append("<td>").append(metrics.get("maSignals")).append("</td>");
+			html.append("<td>").append(metrics.get("reversalWarning")).append("</td>");
+			html.append("<td>").append(metrics.get("topSectors")).append("</td>");
+			html.append("<td>").append(metrics.get("bottomSectors")).append("</td>");
+			html.append("<td>").append(metrics.get("forecast")).append("</td>");
+			html.append("</tr>");
+		}
+
+		html.append("</tbody></table>");
+		// Add placeholder for future Chart.js visualizations
+		html.append("<!-- Future Chart.js visualizations: A/D Line, % Above MA10, etc. -->");
+		html.append("<h3>Sector Breadth Details</h3><p>").append(breadthData.get(0).get("sectorSummary"))
+				.append("</p>");
+		html.append("</div></body></html>");
+
+		// Save to file
+		String fileName = config.outputDirectory + "MarketBreadth_" + dates.get(0) + ".html";
+		try (PrintWriter writer = new PrintWriter(new FileWriter(fileName))) {
+			writer.write(html.toString());
+			LOG.info("Market breadth table with analytics saved to {}", fileName);
+		} catch (IOException e) {
+			LOG.error("Error saving market breadth table to {}: {}", fileName, e.getMessage());
+		}
+	}
+
+	// Helper method for A/D Line slope
+	private double calculateADLineSlope(List<Map<String, Object>> breadthData, int currentADLine, int lookback) {
+		if (breadthData.size() < lookback)
+			return 0.0;
+		int pastIndex = Math.min(breadthData.size(), lookback);
+		Integer pastADLine = (Integer) breadthData.get(pastIndex - 1).get("adLine");
+		return pastADLine != null ? (currentADLine - pastADLine) / (double) lookback : 0.0;
+	}
+
+	// Helper method for EMA calculation
+	private double calculateEMA(List<Map<String, Object>> breadthData, double currentValue, int period, String key) {
+		if (breadthData.isEmpty())
+			return currentValue;
+		double multiplier = 2.0 / (period + 1);
+		double prevEMA = breadthData.get(breadthData.size() - 1).get(key) instanceof String
+				? Double.parseDouble((String) breadthData.get(breadthData.size() - 1).get(key))
+				: (double) (Integer) breadthData.get(breadthData.size() - 1).get(key);
+		return (currentValue * multiplier) + (prevEMA * (1 - multiplier));
+	}
+
+	// Helper method for reversal pattern detection
+	private String detectReversalPatterns(List<Map<String, Object>> breadthData, double pctAboveMA10,
+			double pctAboveMA20, double pctAboveMA50, double pctAboveMA200, double adRatio, double trin,
+			int currentADLine, String currentDate) {
+		if (breadthData.size() < 10)
+			return "Insufficient data";
+		StringBuilder warnings = new StringBuilder();
+
+		// Define thresholds
+		double highMAPct = 80.0, lowMAPct = 20.0;
+		double highADRatio = 2.0, lowADRatio = 0.5;
+		double highTRIN = 2.0, lowTRIN = 0.5;
+
+		// Check for high MA percentages (potential top)
+		if (pctAboveMA10 > highMAPct || pctAboveMA20 > highMAPct || pctAboveMA50 > highMAPct
+				|| pctAboveMA200 > highMAPct) {
+			// Look for A/D Line reversal (drop) in next 10 days
+			int futureIndex = -1;
+			for (int i = 0; i < breadthData.size(); i++) {
+				if (breadthData.get(i).get("date").equals(currentDate)) {
+					futureIndex = i - Math.min(10, i);
+					break;
+				}
+			}
+			if (futureIndex >= 0) {
+				int futureADLine = (Integer) breadthData.get(futureIndex).get("adLine");
+				if (futureADLine < currentADLine) {
+					warnings.append(String.format("High MA%% (%.2f, %.2f, %.2f, %.2f): Potential Top; ", pctAboveMA10,
+							pctAboveMA20, pctAboveMA50, pctAboveMA200));
+				}
+			}
+		}
+
+		// Check for low MA percentages (potential bottom)
+		if (pctAboveMA10 < lowMAPct || pctAboveMA20 < lowMAPct || pctAboveMA50 < lowMAPct || pctAboveMA200 < lowMAPct) {
+			int futureIndex = -1;
+			for (int i = 0; i < breadthData.size(); i++) {
+				if (breadthData.get(i).get("date").equals(currentDate)) {
+					futureIndex = i - Math.min(10, i);
+					break;
+				}
+			}
+			if (futureIndex >= 0) {
+				int futureADLine = (Integer) breadthData.get(futureIndex).get("adLine");
+				if (futureADLine > currentADLine) {
+					warnings.append(String.format("Low MA%% (%.2f, %.2f, %.2f, %.2f): Potential Bottom; ", pctAboveMA10,
+							pctAboveMA20, pctAboveMA50, pctAboveMA200));
+				}
+			}
+		}
+
+		// Check A/D Ratio and TRIN
+		if (adRatio > highADRatio && detectFutureADLineDrop(breadthData, currentADLine, currentDate, 10)) {
+			warnings.append("High A/D Ratio: Potential Top; ");
+		}
+		if (trin > highTRIN && detectFutureADLineRise(breadthData, currentADLine, currentDate, 10)) {
+			warnings.append("High TRIN: Potential Bottom; ");
+		}
+
+		return warnings.length() > 0 ? warnings.toString() : "None";
+	}
+
+	// Helper methods for reversal detection
+	private boolean detectFutureADLineDrop(List<Map<String, Object>> breadthData, int currentADLine, String currentDate,
+			int lookforward) {
+		int currentIndex = -1;
+		for (int i = 0; i < breadthData.size(); i++) {
+			if (breadthData.get(i).get("date").equals(currentDate)) {
+				currentIndex = i;
+				break;
+			}
+		}
+		if (currentIndex == -1 || currentIndex - lookforward < 0)
+			return false;
+		int futureADLine = (Integer) breadthData.get(currentIndex - lookforward).get("adLine");
+		return futureADLine < currentADLine;
+	}
+
+	private boolean detectFutureADLineRise(List<Map<String, Object>> breadthData, int currentADLine, String currentDate,
+			int lookforward) {
+		int currentIndex = -1;
+		for (int i = 0; i < breadthData.size(); i++) {
+			if (breadthData.get(i).get("date").equals(currentDate)) {
+				currentIndex = i;
+				break;
+			}
+		}
+		if (currentIndex == -1 || currentIndex - lookforward < 0)
+			return false;
+		int futureADLine = (Integer) breadthData.get(currentIndex - lookforward).get("adLine");
+		return futureADLine > currentADLine;
+	}
 }
