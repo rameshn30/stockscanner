@@ -20,6 +20,7 @@ public class BBValues {
 	double ma_200;
 	double upper;
 	double lower;
+	double bodyAvg10;
 	double bodyAvg20;
 	double fiftyTwoWeekHigh;
 	double fiftyTwoWeekLow;

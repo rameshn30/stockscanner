@@ -1,5 +1,7 @@
 package com.ramgenix.scanner.controller;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -16,6 +18,8 @@ import com.ramgenix.scanner.service.StockMasterService;
 @RestController
 @RequestMapping("/stockdata")
 public class DataInjestionController {
+
+	private static final Logger LOG = LoggerFactory.getLogger(Logger.class);
 
 	@Autowired
 	DataInjestionServiceNSEImpl service;
@@ -57,6 +61,7 @@ public class DataInjestionController {
 			}
 			return ResponseEntity.ok("Success");
 		} catch (Exception e) {
+			LOG.error("Exception", e);
 			return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Processing failed: " + e.getMessage());
 		}
 	}

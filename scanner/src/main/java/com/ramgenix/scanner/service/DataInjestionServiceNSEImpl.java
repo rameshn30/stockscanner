@@ -71,6 +71,7 @@ public class DataInjestionServiceNSEImpl {
 	Set<String> etfStocks = new HashSet<>();
 	List<String> dates = new ArrayList<>();
 	Map<String, String> symbolToWatchlistMap = new HashMap<>();
+	String timeFrame = "Daily";
 
 	static final String TEMP_DIR = System.getProperty("java.io.tmpdir");
 
@@ -80,12 +81,15 @@ public class DataInjestionServiceNSEImpl {
 	private final Map<String, String> patternToFileNameMap;
 	private final StockDataConverter stockDataConverter;
 
+	private MarketBreadthService marketBreadthService;
+
 	@Autowired
 	public DataInjestionServiceNSEImpl(PatternRepository patternRepository, StockMasterRepository stockMasterRepository,
-			StockDataConverter stockDataConverter) {
+			StockDataConverter stockDataConverter, MarketBreadthService marketBreadthService) {
 		this.patternRepository = patternRepository;
 		this.stockMasterRepository = stockMasterRepository;
 		this.stockDataConverter = stockDataConverter;
+		this.marketBreadthService = marketBreadthService;
 		this.patternToFileNameMap = new HashMap<>();
 		patternToFileNameMap.put("BurstRetracement", "BurstRetracement");
 		patternToFileNameMap.put("NearSupport", "NearSupport");
@@ -123,7 +127,7 @@ public class DataInjestionServiceNSEImpl {
 	Map<String, List<Pattern>> patternResults = new ConcurrentHashMap<>();
 	Set<String> patternResultsSet = new HashSet<>();
 	String outputFilePath = "C:\\Users\\USER\\OneDrive - RamGenix\\ASX\\newhtml\\";
-	private String stockchartsurl = "p=W&yr=2&mn=0&dy=0&i=t7931272857c&r=1752991772405";
+	private String stockchartsurl = "p=D&yr=0&mn=6&dy=0&i=t0167424596c&r=1753075661326";
 	Set<String> inputWatchList = new HashSet<>();
 	String watchlist = "";
 
@@ -153,6 +157,7 @@ public class DataInjestionServiceNSEImpl {
 
 	public String processLatestData(Market market, String timeframe, String watchlist) {
 		this.watchlist = watchlist;
+		this.timeFrame = timeframe;
 		MarketConfig config = marketConfigs.get(market);
 		if (config == null) {
 			LOG.error("Invalid market: {}", market);
@@ -225,11 +230,13 @@ public class DataInjestionServiceNSEImpl {
 		});
 
 		if (StringUtils.isEmpty(watchlist)) {
-			watchList(market);
+			// watchList(market);
 		}
 
 		getRestingStocksAfterBurst(market);
-		// generateMarketBreadthTable(market); // Added market breadth table generation
+		// Delegate market breadth and sector breadth generation to MarketBreadthService
+		// marketBreadthService.generateMarketBreadthTable(market, stockDataMap, dates,
+		// marketConfigs, "Daily");
 
 		// Process all pattern types
 		patternToFileNameMap.forEach((patternName, fileName) -> saveSortedPatterns(market, timeframe, patternName,
@@ -690,7 +697,7 @@ public class DataInjestionServiceNSEImpl {
 		if (config == null)
 			return false;
 
-		if (sd.tail_0 >= (1 * sd.body_0) && sd.low_0 <= sd.low_1 && (sd.head_0 == 0 || (sd.tail_0 / sd.head_0) > 1.5)) {
+		if (isBottomTail(sd)) {
 
 			Pattern pattern = Pattern.builder().bbValues(bbValues).patternName(type).stockData(stockDataList.get(0))
 					.head(sd.head_0).tail(sd.tail_0).body0(sd.body_0).country(config.country).build();
@@ -704,6 +711,13 @@ public class DataInjestionServiceNSEImpl {
 		}
 		return false;
 
+	}
+
+	private boolean isBottomTail(StockDataInfo sd) {
+		if (sd.tail_0 >= (1 * sd.body_0) && sd.low_0 <= sd.low_1 && (sd.head_0 == 0 || (sd.tail_0 / sd.head_0) > 1.5)) {
+			return true;
+		}
+		return false;
 	}
 
 	private boolean bullishEngulfing(String symbol, List<StockData> stockDataList) {
@@ -1727,13 +1741,33 @@ public class DataInjestionServiceNSEImpl {
 			int rank = 0;
 			if (isInsideBar(sd)) {
 				rank++;
-				rankStr += " IB ";
+				rank++; // IB gets high precedence // coz paradeep on july 18 went all the way down
+						// despite being a nice IB.
+						// somtimes we have only IB and not other things. those should not get ignored
+				rankStr += " IB-";
 			}
 			if (adr > 5) {
+				// rank++;
+				// rankStr += " ADR >5 -";
+			}
+			if (sd.low_0 < bb.getMa_10() && sd.high_0 > bb.getMa_10()) {
 				rank++;
-				rankStr += " ADR >5 ";
+				rankStr += " 10 MA bounce-";
+			} else if (sd.low_0 < bb.getMa_20() && sd.high_0 > bb.getMa_20()) {
+				rank++;
+				rankStr += " 20 MA bounce-";
 			}
 
+			if (isBottomTail(sd)) {
+				rank++;
+				rankStr += " Tail- ";
+			}
+
+			if (rank == 0) {
+				continue;
+			}
+
+			pattern.setAdr(new BigDecimal(adr));
 			pattern.setRank(rank);
 			pattern.setRankStr(rankStr);
 			patternResults.computeIfAbsent(type, k -> new ArrayList<>()).add(pattern);
@@ -2196,6 +2230,10 @@ public class DataInjestionServiceNSEImpl {
 	private boolean volumeCheck(List<StockData> stockDataList) {
 
 		StockDataInfo sd = new StockDataInfo(stockDataList);
+
+		if ("Weekly".equalsIgnoreCase(timeFrame)) {
+			return sd.volume_0 > 500000 ? true : false;
+		}
 
 		if (sd.volume_0 < 100000) {
 			// im losing several stocks due to this. hence commenting this. volume contracts

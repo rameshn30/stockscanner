@@ -40,6 +40,7 @@ public class Pattern {
 	private BigDecimal close;
 	private BigDecimal gapupPct;
 	private BigDecimal changePct;
+	private BigDecimal adr;
 	private String country;
 	@Transient
 	private double rank;
