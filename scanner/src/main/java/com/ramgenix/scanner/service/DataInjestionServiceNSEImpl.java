@@ -127,7 +127,7 @@ public class DataInjestionServiceNSEImpl {
 	Map<String, List<Pattern>> patternResults = new ConcurrentHashMap<>();
 	Set<String> patternResultsSet = new HashSet<>();
 	String outputFilePath = "C:\\Users\\USER\\OneDrive - RamGenix\\ASX\\newhtml\\";
-	private String stockchartsurl = "p=D&yr=0&mn=6&dy=0&i=t0167424596c&r=1753075661326";
+	private String stockchartsurl = "p=D&yr=0&mn=6&dy=0&i=t7275053503c&r=1753158373997";
 	Set<String> inputWatchList = new HashSet<>();
 	String watchlist = "";
 
@@ -220,7 +220,7 @@ public class DataInjestionServiceNSEImpl {
 				boolean goldenStocksOnly = false;
 				{
 					if (findBullishPatternsAdvanced(market, symbol, timeframe, stockDataList, goldenStocksOnly)) {
-
+						patternResultsSet.add(symbol);
 					}
 					upday(symbol, stockDataList);
 					downDay(symbol, stockDataList);
@@ -248,9 +248,6 @@ public class DataInjestionServiceNSEImpl {
 
 	private boolean findBullishPatternsAdvanced(Market market, String symbol, String timeframe,
 			List<StockData> stockDataList, boolean superStrongStocksOnly) {
-
-		findNearSupportStocks(symbol, stockDataList);
-		findBreakoutRetracementStocks(symbol, timeframe, stockDataList);
 
 		// Constants for bull flag detection parameters
 		double BULL_FLAG_FLAGPOLE_BURST_THRESHOLD = 1.19; // Minimum price increase for swing high // (19%)
@@ -283,20 +280,31 @@ public class DataInjestionServiceNSEImpl {
 			// BULL_FLAG_FLAGPOLE_HIGH_MIN_DISTANCE_FROM_CURRENT = 1;
 		}
 
-		findBullFlagStocksAdvanced(market, symbol, timeframe, stockDataList, BULL_FLAG_FLAGPOLE_BURST_THRESHOLD,
-				BULL_FLAG_FLAGPOLE_HIGH_MIN_DISTANCE_FROM_CURRENT, minimumFlagPoleBars, maximumFlagPoleBars,
-				"BULL_FLAG");
+		boolean result = false;
 
 		if (!volumeCheck(stockDataList) || !priceCheck(stockDataList))
 			return false;
 
-		boolean result = false;
+		result = findNearSupportStocks(symbol, stockDataList);
+		if (result)
+			return true;
+
+		result = findBreakoutRetracementStocks(symbol, timeframe, stockDataList);
+		if (result)
+			return true;
 
 		result = findHammerStocks(symbol, stockDataList);
 		if (result)
 			return true;
 
 		result = findBottomTailStocks(symbol, stockDataList);
+		if (result)
+			return true;
+
+		result = findBullFlagStocksAdvanced(market, symbol, timeframe, stockDataList,
+				BULL_FLAG_FLAGPOLE_BURST_THRESHOLD, BULL_FLAG_FLAGPOLE_HIGH_MIN_DISTANCE_FROM_CURRENT,
+				minimumFlagPoleBars, maximumFlagPoleBars, "BULL_FLAG");
+
 		if (result)
 			return true;
 
@@ -762,31 +770,33 @@ public class DataInjestionServiceNSEImpl {
 	}
 
 	private boolean findNearSupportStocks(String symbol, List<StockData> stockDataList) {
-
-		if (!symbol.equals("MAZDOCK")) {
-			// return false;
-		}
-
 		if (stockDataList == null || stockDataList.isEmpty() || !volumeCheck(stockDataList)
 				|| !priceCheck(stockDataList)) {
 			return false;
 		}
-		String type = "NearSupport";
-		double proximityThreshold = 3;
-		StockDataInfo sd = new StockDataInfo(stockDataList);
-		MarketConfig config = marketConfigs.get(Market.NSE); // Default to NSE, adjust if needed
-		if (config == null)
-			return false;
 
-		if (stockDataList.size() < 3) {
+		StockDataInfo sd = new StockDataInfo(stockDataList);
+		if (sd.volume_0 < 100000) {
 			return false;
 		}
 
-		double close0 = stockDataList.get(0).getClose(); // today
-		double close1 = stockDataList.get(1).getClose(); // yesterday
-		double latestClose = Math.max(close0, close1);
+		String type = "NearSupport";
+		double proximityThreshold = 2.5; // Upper bound: 3% above support
+		double lowerProximityThreshold = -1.0; // Lower bound: 1% below support
+		MarketConfig config = marketConfigs.get(Market.NSE);
+		if (config == null) {
+			LOG.error("No MarketConfig found for NSE");
+			return false;
+		}
 
+		if (stockDataList.size() < 3) {
+			LOG.warn("Insufficient data for symbol {}: size={}", symbol, stockDataList.size());
+			return false;
+		}
+
+		double latestClose = stockDataList.get(0).getClose();
 		if (latestClose == 0.0) {
+			LOG.warn("Invalid latest close price for symbol {}: {}", symbol, latestClose);
 			return false;
 		}
 
@@ -795,34 +805,33 @@ public class DataInjestionServiceNSEImpl {
 		LocalDate supportDate = null;
 		int supportLevelIndex = -1;
 
-		for (int i = 5; i < stockDataList.size(); i++) {
+		int maxBars = stockDataList.size() > 30 ? 30 : stockDataList.size();
+
+		for (int i = 10; i < maxBars; i++) {
 			StockData stockData = stockDataList.get(i);
 			if ("L".equals(stockData.getSwingType())) {
 				double lowPrice = stockData.getLow();
-				if (lowPrice < close0 && lowPrice < close1) {
-					percentageDiff = ((close0 - lowPrice) / lowPrice) * 100;
-					if (percentageDiff > proximityThreshold) {
-						percentageDiff = ((close1 - lowPrice) / lowPrice) * 100;
-						if (percentageDiff > proximityThreshold)
-							continue; // Skip if initial check fails, move to next support
-					}
-					supportLevel = lowPrice;
-					supportDate = stockData.getDate();
-					supportLevelIndex = i;
-
-					// New inner loop to check all bars from i to 0
-					boolean validRange = true;
-					for (int j = i; j >= 0; j--) {
-						double currentClose = stockDataList.get(j).getClose();
-						if (currentClose < supportLevel)
-							return false;
-					}
-					if (!validRange) {
-						return false; // Skip to next support if range check fails
-					}
-
-					break; // Exit outer loop if a valid support and range are found
+				percentageDiff = ((latestClose - lowPrice) / lowPrice) * 100;
+				if (percentageDiff > proximityThreshold || percentageDiff < lowerProximityThreshold) {
+					continue; // Skip if outside [-1%, 3%] range
 				}
+				supportLevel = lowPrice;
+				supportDate = stockData.getDate();
+				supportLevelIndex = i;
+
+				boolean validRange = true;
+				for (int j = i; j >= 0; j--) {
+					double currentClose = stockDataList.get(j).getClose();
+					if (currentClose < supportLevel) {
+						validRange = false;
+						return false;
+					}
+				}
+				if (!validRange) {
+					return false;
+				}
+
+				break; // Exit outer loop if a valid support and range are found
 			}
 		}
 
@@ -1328,9 +1337,18 @@ public class DataInjestionServiceNSEImpl {
 				rankStr += " ADR >5 ";
 			}
 
-			if (swingHighIndex <= 10) {
+			/*
+			 * if (swingHighIndex <= 10) { rank++; rankStr += " Recent Swing High:" +
+			 * swingHighIndex; }
+			 */
+
+			/*
+			 * Manas looking for things (only sometimes , not all times ) that have been
+			 * consolidating for some time. let me try this for some time
+			 */
+			if (swingHighIndex >= 15) {
 				rank++;
-				rankStr += " Recent Swing High:" + swingHighIndex;
+				rankStr += " Long term Consolidation:" + swingHighIndex;
 			}
 
 			if (sd.low_0 < bbValues.getMa_10() && sd.high_0 > bbValues.getMa_10()) {
@@ -1667,7 +1685,7 @@ public class DataInjestionServiceNSEImpl {
 	public void getRestingStocksAfterBurst(Market market) {
 		List<Pattern> results = getPatternsFromDB(market);
 
-		patternResultsSet.clear();
+		// patternResultsSet.clear();
 		for (Pattern pattern : results) {
 			if (patternResultsSet.contains(pattern.getSymbol()))
 				continue;
@@ -1717,9 +1735,8 @@ public class DataInjestionServiceNSEImpl {
 
 			BBValues bb = calculateBBAndMaValues(pattern.getSymbol(), stockDataList, 0);
 
-			if (bb == null || bb != null && sd.close_0 > bb.getMa_50() && sd.close_0 > bb.getMa_50()
-					&& bb.getMa_20() > bb.getMa_50()) {
-				// validPattern = false;
+			if (bb == null || bb != null && (sd.close_0 < bb.getMa_50() || bb.getMa_20() < bb.getMa_50())) {
+				validPattern = false;
 			}
 
 			if (!validPattern)
