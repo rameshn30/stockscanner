@@ -15,8 +15,10 @@ import java.time.format.DateTimeParseException;
 import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -107,6 +109,8 @@ public class DataInjestionServiceNSEImpl {
 		patternToFileNameMap.put("UpDay", "UpDay");
 		patternToFileNameMap.put("DownDay", "DownDay");
 
+		patternToFileNameMap.put("MultiplePatterns", "MultiplePatterns");
+
 		this.marketConfigs = new HashMap<>();
 		marketConfigs.put(Market.NSE,
 				new MarketConfig("C:\\Users\\USER\\OneDrive - RamGenix\\ASX\\dates.txt",
@@ -127,7 +131,7 @@ public class DataInjestionServiceNSEImpl {
 	Map<String, List<Pattern>> patternResults = new ConcurrentHashMap<>();
 	Set<String> patternResultsSet = new HashSet<>();
 	String outputFilePath = "C:\\Users\\USER\\OneDrive - RamGenix\\ASX\\newhtml\\";
-	private String stockchartsurl = "p=D&yr=0&mn=6&dy=0&i=t7275053503c&r=1753158373997";
+	private String stockchartsurl = "p=D&yr=0&mn=6&dy=0&i=t1679372617c&r=1753271085578";
 	Set<String> inputWatchList = new HashSet<>();
 	String watchlist = "";
 
@@ -238,6 +242,9 @@ public class DataInjestionServiceNSEImpl {
 		// marketBreadthService.generateMarketBreadthTable(market, stockDataMap, dates,
 		// marketConfigs, "Daily");
 
+		List<Pattern> extractAndRemoveDuplicateSymbols = extractAndRemoveDuplicateSymbols(patternResults);
+		patternResults.put("MultiplePatterns", extractAndRemoveDuplicateSymbols);
+
 		// Process all pattern types
 		patternToFileNameMap.forEach((patternName, fileName) -> saveSortedPatterns(market, timeframe, patternName,
 				timeframe + "-" + fileName));
@@ -282,6 +289,10 @@ public class DataInjestionServiceNSEImpl {
 
 		boolean result = false;
 
+		result = findBullFlagStocksAdvanced(market, symbol, timeframe, stockDataList,
+				BULL_FLAG_FLAGPOLE_BURST_THRESHOLD, BULL_FLAG_FLAGPOLE_HIGH_MIN_DISTANCE_FROM_CURRENT,
+				minimumFlagPoleBars, maximumFlagPoleBars, "BULL_FLAG");
+
 		if (!volumeCheck(stockDataList) || !priceCheck(stockDataList))
 			return false;
 
@@ -301,26 +312,11 @@ public class DataInjestionServiceNSEImpl {
 		if (result)
 			return true;
 
-		result = findBullFlagStocksAdvanced(market, symbol, timeframe, stockDataList,
-				BULL_FLAG_FLAGPOLE_BURST_THRESHOLD, BULL_FLAG_FLAGPOLE_HIGH_MIN_DISTANCE_FROM_CURRENT,
-				minimumFlagPoleBars, maximumFlagPoleBars, "BULL_FLAG");
-
-		if (result)
-			return true;
-
 		result = pbs(symbol, stockDataList);
 		if (result)
 			return true;
 
 		result = bullishEngulfing(symbol, stockDataList);
-		if (result)
-			return true;
-
-		result = pierce(symbol, stockDataList);
-		if (result)
-			return true;
-
-		result = greenRed(symbol, stockDataList);
 		if (result)
 			return true;
 
@@ -348,13 +344,74 @@ public class DataInjestionServiceNSEImpl {
 		}
 	}
 
+	public static List<Pattern> extractAndRemoveDuplicateSymbols(Map<String, List<Pattern>> patternResults) {
+		// symbol → all original rankStrs
+		Map<String, Set<String>> symbolToRankStrs = new HashMap<>();
+		// symbol → all pattern names
+		Map<String, Set<String>> symbolToPatternNames = new HashMap<>();
+		// symbol → any one Pattern (for symbol + reuse of fields)
+		Map<String, Pattern> symbolToAnyPattern = new HashMap<>();
+
+		List<Pattern> multiplePatternList = new ArrayList<>();
+
+		// Step 1: Scan all entries and build maps
+		for (Map.Entry<String, List<Pattern>> entry : patternResults.entrySet()) {
+			String patternName = entry.getKey();
+			if ("UpDay".equals(patternName) || "DownDay".equals(patternName) || "PowerUpCandle".equals(patternName)
+					|| "PurpleDot".equals(patternName))
+				continue;
+			for (Pattern pattern : entry.getValue()) {
+				String symbol = pattern.getSymbol();
+				String rankStr = pattern.getRankStr();
+
+				symbolToRankStrs.computeIfAbsent(symbol, k -> new HashSet<>());
+				if (rankStr != null && !rankStr.trim().isEmpty()) {
+					symbolToRankStrs.get(symbol).add(rankStr.trim());
+				}
+
+				symbolToPatternNames.computeIfAbsent(symbol, k -> new HashSet<>()).add(patternName);
+
+				symbolToAnyPattern.putIfAbsent(symbol, pattern);
+			}
+		}
+
+		// Step 2: Identify duplicates and create merged Pattern
+		for (String symbol : symbolToPatternNames.keySet()) {
+			Set<String> patterns = symbolToPatternNames.get(symbol);
+			if (patterns.size() > 1) {
+				Set<String> combined = new LinkedHashSet<>();
+				combined.addAll(symbolToRankStrs.getOrDefault(symbol, Collections.emptySet()));
+				combined.addAll(patterns); // pattern names
+
+				String finalRankStr = String.join(",", combined);
+
+				Pattern base = symbolToAnyPattern.get(symbol);
+				Pattern combinedPattern = new Pattern();
+				combinedPattern.setSymbol(symbol);
+				combinedPattern.setRankStr(finalRankStr);
+
+				multiplePatternList.add(combinedPattern);
+
+				// Remove symbol from all patternResults entries
+				for (List<Pattern> patternList : patternResults.values()) {
+					patternList.removeIf(p -> p.getSymbol().equals(symbol));
+				}
+			}
+		}
+
+		// Step 3: Remove empty lists
+		patternResults.entrySet().removeIf(e -> e.getValue().isEmpty());
+
+		return multiplePatternList;
+	}
+
 	private List<Pattern> getIncrementalPatterns(Market market, String patternName, String timeframe,
 			List<Pattern> currentPatterns) {
 		Set<String> previousSymbols = getPreviousDaySymbols(market, patternName, timeframe);
 		List<Pattern> incrementalPatterns = new ArrayList<>();
 
 		for (Pattern pattern : currentPatterns) {
-			String symbol = pattern.getStockData().getSymbol();
+			String symbol = pattern.getSymbol();
 			if (!previousSymbols.contains(symbol)) {
 				incrementalPatterns.add(pattern);
 			}
@@ -615,8 +672,9 @@ public class DataInjestionServiceNSEImpl {
 
 		if (changePct > 7) {
 			String type = "PowerUpCandle";
-			Pattern pattern = Pattern.builder().bbValues(bbValues).patternName(type).stockData(stockDataList.get(0))
-					.head(sd.head_0).tail(sd.tail_0).body0(sd.body_0).country(config.country).build();
+			Pattern pattern = Pattern.builder().symbol(symbol).bbValues(bbValues).patternName(type)
+					.stockData(stockDataList.get(0)).head(sd.head_0).tail(sd.tail_0).body0(sd.body_0)
+					.country(config.country).build();
 
 			pattern.setRank((int) Math.round(changePct));
 			pattern.setChangePct(new BigDecimal(changePct));
@@ -641,8 +699,9 @@ public class DataInjestionServiceNSEImpl {
 
 		if (gapPercentage > 3.5 && sd.volume_0 > sd.volume_1 && sd.close_0 > sd.open_0 && sd.close_0 > sd.close_1) {
 			String type = "Gapup";
-			Pattern pattern = Pattern.builder().bbValues(bbValues).patternName(type).stockData(stockDataList.get(0))
-					.head(sd.head_0).tail(sd.tail_0).body0(sd.body_0).country(config.country).build();
+			Pattern pattern = Pattern.builder().symbol(symbol).bbValues(bbValues).patternName(type)
+					.stockData(stockDataList.get(0)).head(sd.head_0).tail(sd.tail_0).body0(sd.body_0)
+					.country(config.country).build();
 
 			pattern.setRank((int) Math.round(gapPercentage));
 			pattern.setGapupPct(new BigDecimal(gapPercentage));
@@ -666,8 +725,9 @@ public class DataInjestionServiceNSEImpl {
 
 		if (sd.tail_0 >= (2 * sd.body_0) && sd.low_0 <= sd.low_1 && (sd.head_0 == 0 || (sd.tail_0 / sd.head_0) > 2)) {
 
-			Pattern pattern = Pattern.builder().bbValues(bbValues).patternName(type).stockData(stockDataList.get(0))
-					.head(sd.head_0).tail(sd.tail_0).body0(sd.body_0).country(config.country).build();
+			Pattern pattern = Pattern.builder().symbol(symbol).bbValues(bbValues).patternName(type)
+					.stockData(stockDataList.get(0)).head(sd.head_0).tail(sd.tail_0).body0(sd.body_0)
+					.country(config.country).build();
 
 			double adr = calculateADR(stockDataList, 20);
 			int rank = 0;
@@ -707,8 +767,9 @@ public class DataInjestionServiceNSEImpl {
 
 		if (isBottomTail(sd)) {
 
-			Pattern pattern = Pattern.builder().bbValues(bbValues).patternName(type).stockData(stockDataList.get(0))
-					.head(sd.head_0).tail(sd.tail_0).body0(sd.body_0).country(config.country).build();
+			Pattern pattern = Pattern.builder().symbol(symbol).bbValues(bbValues).patternName(type)
+					.stockData(stockDataList.get(0)).head(sd.head_0).tail(sd.tail_0).body0(sd.body_0)
+					.country(config.country).build();
 
 			pattern.setRank(sd.tail_0);
 			pattern.setRankStr("sd.tail_0:" + sd.tail_0);
@@ -737,8 +798,8 @@ public class DataInjestionServiceNSEImpl {
 		if (sd.close_0 > sd.open_0 && (sd.close_1 < sd.open_1 || sd.close_2 < sd.open_2) && sd.body_0 > bodyThreshold
 
 				&& (sd.body_0 > sd.body_1 || sd.close_0 > sd.open_1)) {
-			Pattern pattern = Pattern.builder().bbValues(bbValues).patternName(type).stockData(stockDataList.get(0))
-					.head(sd.head_0).tail(sd.tail_0).body0(sd.body_0).build();
+			Pattern pattern = Pattern.builder().symbol(symbol).bbValues(bbValues).patternName(type)
+					.stockData(stockDataList.get(0)).head(sd.head_0).tail(sd.tail_0).body0(sd.body_0).build();
 
 			double adr = calculateADR(stockDataList, 20);
 			pattern.setRank(adr);
@@ -756,8 +817,8 @@ public class DataInjestionServiceNSEImpl {
 		double half = (sd.open_1 + sd.close_1) / 2;
 
 		if (sd.close_0 > sd.open_0 && sd.close_1 < sd.open_1 && sd.close_0 > half && sd.open_0 <= sd.close_1) {
-			Pattern pattern = Pattern.builder().bbValues(bbValues).patternName(type).stockData(stockDataList.get(0))
-					.head(sd.head_0).tail(sd.tail_0).body0(sd.body_0).build();
+			Pattern pattern = Pattern.builder().symbol(symbol).bbValues(bbValues).patternName(type)
+					.stockData(stockDataList.get(0)).head(sd.head_0).tail(sd.tail_0).body0(sd.body_0).build();
 
 			double adr = calculateADR(stockDataList, 20);
 			pattern.setRank(adr);
@@ -839,8 +900,8 @@ public class DataInjestionServiceNSEImpl {
 			return false;
 		}
 
-		Pattern pattern = Pattern.builder().patternName(type).stockData(stockDataList.get(0)).head(sd.head_0)
-				.tail(sd.tail_0).body0(sd.body_0).country(config.country).build();
+		Pattern pattern = Pattern.builder().symbol(symbol).patternName(type).stockData(stockDataList.get(0))
+				.head(sd.head_0).tail(sd.tail_0).body0(sd.body_0).country(config.country).build();
 		String rankStr = " DistanceToSupport:" + String.format("%.2f%%", percentageDiff) + " SupportLevel:"
 				+ String.format("%.2f", supportLevel) + " SupportDate:"
 				+ (supportDate != null ? supportDate.toString() : "N/A") + " LatestClose:"
@@ -1005,7 +1066,7 @@ public class DataInjestionServiceNSEImpl {
 
 										if (currentClose >= lowerBound && currentClose <= upperBound) {
 											StockDataInfo sd = new StockDataInfo(stockDataList);
-											Pattern pattern = Pattern.builder().patternName(patternType)
+											Pattern pattern = Pattern.builder().symbol(symbol).patternName(patternType)
 													.stockData(stockDataList.get(0)).head(sd.head_0).tail(sd.tail_0)
 													.body0(sd.body_0).build();
 
@@ -1310,8 +1371,8 @@ public class DataInjestionServiceNSEImpl {
 			}
 
 			// Create Pattern object with static metrics from StockDataInfo
-			Pattern pattern = Pattern.builder().patternName(patternType).stockData(stockDataList.get(0)).head(sd.head_0)
-					.tail(sd.tail_0).body0(sd.body_0).symbol(symbol).build();
+			Pattern pattern = Pattern.builder().symbol(symbol).patternName(patternType).stockData(stockDataList.get(0))
+					.head(sd.head_0).tail(sd.tail_0).body0(sd.body_0).symbol(symbol).build();
 
 			// Calculate metrics for rank string
 			double flagpoleSizePercent = ((flagPoleHighPrice - flagPoleLowPrice) / flagPoleLowPrice) * 100;
@@ -1505,8 +1566,8 @@ public class DataInjestionServiceNSEImpl {
 			double latestSupportPrice = lowPrice2 + (supportSlope * (lowIndex1 - lowIndex2));
 			if (currentPrice >= latestSupportPrice && currentPrice <= resistanceLevel) {
 				// Create Pattern object with static metrics from StockDataInfo
-				Pattern pattern = Pattern.builder().patternName(patternType).stockData(stockDataList.get(0))
-						.head(sd.head_0).tail(sd.tail_0).body0(sd.body_0).build();
+				Pattern pattern = Pattern.builder().symbol(symbol).patternName(patternType)
+						.stockData(stockDataList.get(0)).head(sd.head_0).tail(sd.tail_0).body0(sd.body_0).build();
 
 				// Calculate metrics for rank string
 				int triangleDays = Math.abs(lowIndex1 - lowIndex2);
@@ -1583,8 +1644,8 @@ public class DataInjestionServiceNSEImpl {
 
 		int rank = 0;
 
-		Pattern pattern = Pattern.builder().bbValues(bbValues).patternName(type).stockData(stockDataList.get(0))
-				.head(sd.head_0).tail(sd.tail_0).body0(sd.body_0).build();
+		Pattern pattern = Pattern.builder().symbol(symbol).bbValues(bbValues).patternName(type)
+				.stockData(stockDataList.get(0)).head(sd.head_0).tail(sd.tail_0).body0(sd.body_0).build();
 
 		pattern.setRank(rank);
 		pattern.setRankStr("Rank:" + rank);
@@ -1604,8 +1665,8 @@ public class DataInjestionServiceNSEImpl {
 		if (ib == true || (sd.close_0 < sd.open_0 && (sd.close_1 > sd.open_1) && sd.close_0 > sd.open_1
 				&& sd.body_1 > sd.body_0 * 1.5)) {
 			{
-				Pattern pattern = Pattern.builder().bbValues(bbValues).patternName(type).stockData(stockDataList.get(0))
-						.head(sd.head_0).tail(sd.tail_0).body0(sd.body_0).build();
+				Pattern pattern = Pattern.builder().symbol(symbol).bbValues(bbValues).patternName(type)
+						.stockData(stockDataList.get(0)).head(sd.head_0).tail(sd.tail_0).body0(sd.body_0).build();
 
 				double adr = calculateADR(stockDataList, 20);
 				pattern.setRank(adr);
@@ -1632,8 +1693,8 @@ public class DataInjestionServiceNSEImpl {
 
 		if (sd.close_0 > sd.open_0 && ((sd.close_0 - sd.close_1) / sd.close_1) * 100 >= 4.5) {
 
-			Pattern pattern = Pattern.builder().patternName(type).stockData(stockDataList.get(0)).head(sd.head_0)
-					.tail(sd.tail_0).body0(sd.body_0).country(config.country).build();
+			Pattern pattern = Pattern.builder().symbol(symbol).patternName(type).stockData(stockDataList.get(0))
+					.head(sd.head_0).tail(sd.tail_0).body0(sd.body_0).country(config.country).build();
 			pattern.setRank(sd.close_0 - sd.close_1);
 			double adr = calculateADR(stockDataList, 20);
 			pattern.setRankStr("ADR:" + adr);
@@ -1656,8 +1717,8 @@ public class DataInjestionServiceNSEImpl {
 
 		// Must be a red candle and down more than 4.5% from yesterday’s close
 		if (sd.close_0 < sd.open_0 && ((sd.close_1 - sd.close_0) / sd.close_1) * 100 >= 4.5) {
-			Pattern pattern = Pattern.builder().patternName(type).stockData(stockDataList.get(0)).head(sd.head_0)
-					.tail(sd.tail_0).body0(sd.body_0).country(config.country).build();
+			Pattern pattern = Pattern.builder().symbol(symbol).patternName(type).stockData(stockDataList.get(0))
+					.head(sd.head_0).tail(sd.tail_0).body0(sd.body_0).country(config.country).build();
 			pattern.setRank(sd.close_1 - sd.close_0);
 			patternResults.computeIfAbsent(type, k -> new ArrayList<>()).add(pattern);
 			return true;
@@ -1673,8 +1734,8 @@ public class DataInjestionServiceNSEImpl {
 			return false;
 
 		if (isPurpleCandle(sd)) {
-			Pattern pattern = Pattern.builder().patternName(type).stockData(stockDataList.get(0)).head(sd.head_0)
-					.tail(sd.tail_0).body0(sd.body_0).country(config.country).build();
+			Pattern pattern = Pattern.builder().symbol(symbol).patternName(type).stockData(stockDataList.get(0))
+					.head(sd.head_0).tail(sd.tail_0).body0(sd.body_0).country(config.country).build();
 			patternResults.computeIfAbsent(type, k -> new ArrayList<>()).add(pattern);
 			savePattern(pattern, type, sd);
 			return true;
@@ -1685,7 +1746,10 @@ public class DataInjestionServiceNSEImpl {
 	public void getRestingStocksAfterBurst(Market market) {
 		List<Pattern> results = getPatternsFromDB(market);
 
-		// patternResultsSet.clear();
+		patternResultsSet.clear(); /*
+									 * don't comment this. i need exclusive set of resting stocks . they cannot be
+									 * mixed with other patterns
+									 */
 		for (Pattern pattern : results) {
 			if (patternResultsSet.contains(pattern.getSymbol()))
 				continue;
@@ -1842,6 +1906,11 @@ public class DataInjestionServiceNSEImpl {
 
 		List<Pattern> results = patternRepository.findDistinctByPatternNameInAndCountryEqualsAndDateRange(patternNames,
 				config.country, startDate, endDate);
+		/*
+		 * for (Pattern pattern : results) { if
+		 * (pattern.getSymbol().equals("SHRIRAMPPS"))
+		 * System.out.println("Got SHRIRAMPPS"); }
+		 */
 		return results;
 	}
 
@@ -1860,8 +1929,9 @@ public class DataInjestionServiceNSEImpl {
 						|| sd.volume_0 > (sd.volume_1 * 3))) {
 			String type = "VolumeShockers";
 
-			Pattern pattern = Pattern.builder().bbValues(bbValues).patternName(type).stockData(stockDataList.get(0))
-					.head(sd.head_0).tail(sd.tail_0).body0(sd.body_0).country(config.country).build();
+			Pattern pattern = Pattern.builder().symbol(symbol).bbValues(bbValues).patternName(type)
+					.stockData(stockDataList.get(0)).head(sd.head_0).tail(sd.tail_0).body0(sd.body_0)
+					.country(config.country).build();
 
 			pattern.setRank((int) (sd.volume_1 / sd.volume_0));
 			String rankStr = "Date:" + stockDataList.get(0).getDate().toString() + " Volume 0:" + sd.volume_0
@@ -1869,7 +1939,7 @@ public class DataInjestionServiceNSEImpl {
 			pattern.setRankStr(rankStr);
 			pattern.setDate(processingDate);
 
-			patternResults.computeIfAbsent(type, k -> new ArrayList<>()).add(pattern);
+			// patternResults.computeIfAbsent(type, k -> new ArrayList<>()).add(pattern);
 
 			savePattern(pattern, type, sd);
 
@@ -2132,7 +2202,8 @@ public class DataInjestionServiceNSEImpl {
 				}
 
 				String rankStr = pattern.getRankStr() != null ? pattern.getRankStr() : "";
-				String symbol = pattern.getStockData() != null ? pattern.getStockData().getSymbol() : "N/A";
+				String symbol = pattern.getStockData() != null ? pattern.getStockData().getSymbol()
+						: pattern.getSymbol();
 				String country = pattern.getCountry() != null ? pattern.getCountry() : config.country;
 				String patternDate = pattern.getDate() != null ? pattern.getDate().toString() : "N/A";
 				String rank = Double.toString(pattern.getRank());
@@ -2475,8 +2546,8 @@ public class DataInjestionServiceNSEImpl {
 				List<StockData> stockDataList = stockDataMap.get(stock.getTicker());
 				if (stockDataList == null || stockDataList.isEmpty())
 					continue;
-				Pattern pattern = Pattern.builder().bbValues(bbValues).patternName(subSector).symbol(stock.getName())
-						.stockData(stockDataList.get(0)).country(config.country).build();
+				Pattern pattern = Pattern.builder().symbol(stock.getTicker()).bbValues(bbValues).patternName(subSector)
+						.symbol(stock.getName()).stockData(stockDataList.get(0)).country(config.country).build();
 				patterns.add(pattern);
 			}
 			// savePatternsToFile(dates.get(0), patterns, fileName, false, true);
